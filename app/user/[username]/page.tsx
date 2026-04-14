@@ -1,0 +1,909 @@
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import {
+  browseApi,
+  subscriptionsApi,
+  messagesApi,
+  mediaUrl,
+} from "@/lib/api";
+import PostCard from "@/components/PostCard";
+import Spinner from "@/components/Spinner";
+import {
+  BadgeCheck,
+  Bell,
+  MessageCircle,
+  Wallet,
+  Grid3X3,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Play,
+  Lock,
+} from "lucide-react";
+
+type TabType = "posts" | "media" | "about";
+
+function safeArray(value: any) {
+  return Array.isArray(value) ? value : [];
+}
+
+function firstDefined(...values: any[]) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractAssetUrl(value: any): string | null {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    const clean = value.trim();
+    return clean || null;
+  }
+
+  if (typeof value !== "object") return null;
+
+  return firstDefined(
+    value?.url,
+    value?.file,
+    value?.src,
+    value?.path,
+    value?.image,
+    value?.image_url,
+    value?.photo,
+    value?.photo_url,
+    value?.avatar,
+    value?.avatar_url,
+    value?.profile_image,
+    value?.profile_image_url,
+    value?.profile_picture,
+    value?.profile_photo,
+    value?.profile_photo_url,
+    value?.cover,
+    value?.cover_url,
+    value?.cover_image,
+    value?.cover_image_url,
+    value?.cover_photo,
+    value?.cover_photo_url,
+    value?.banner,
+    value?.banner_url,
+    value?.banner_image,
+    value?.banner_image_url,
+    value?.header_image,
+    value?.header_image_url,
+    value?.background_image,
+    value?.background_image_url,
+    value?.upload,
+    value?.upload_url
+  );
+}
+
+function normalizeCreator(raw: any) {
+  const dataLayer = raw?.data || {};
+  const creatorLayer = dataLayer?.creator || {};
+  const subscriptionLayer = dataLayer?.subscription || {};
+
+  const source =
+    creatorLayer && Object.keys(creatorLayer).length > 0
+      ? creatorLayer
+      : raw?.creator ||
+        raw?.profile ||
+        raw?.user ||
+        raw?.results ||
+        raw?.data ||
+        raw ||
+        {};
+
+  const nestedUser = source?.user || source?.creator || source?.profile || {};
+
+  const id = firstDefined(
+    source?.id,
+    source?.creator_id,
+    source?.user_id,
+    nestedUser?.id,
+    nestedUser?.creator_id,
+    nestedUser?.user_id
+  );
+
+  const username = firstDefined(
+    source?.username,
+    source?.user_name,
+    source?.handle,
+    nestedUser?.username,
+    nestedUser?.user_name,
+    nestedUser?.handle
+  );
+
+  const displayName = firstDefined(
+    source?.display_name,
+    source?.full_name,
+    source?.name,
+    source?.creator_name,
+    nestedUser?.display_name,
+    nestedUser?.full_name,
+    nestedUser?.name,
+    username,
+    "Creator"
+  );
+
+  const avatar = firstDefined(
+    extractAssetUrl(source?.avatar),
+    extractAssetUrl(source?.avatar_url),
+    extractAssetUrl(source?.profile_image),
+    extractAssetUrl(source?.profile_image_url),
+    extractAssetUrl(source?.profile_picture),
+    extractAssetUrl(source?.profile_photo),
+    extractAssetUrl(source?.profile_photo_url),
+    extractAssetUrl(source?.image),
+    extractAssetUrl(source?.image_url),
+    extractAssetUrl(source?.photo),
+    extractAssetUrl(source?.photo_url),
+    extractAssetUrl(source?.upload_image),
+    extractAssetUrl(source?.uploaded_image),
+
+    extractAssetUrl(nestedUser?.avatar),
+    extractAssetUrl(nestedUser?.avatar_url),
+    extractAssetUrl(nestedUser?.profile_image),
+    extractAssetUrl(nestedUser?.profile_image_url),
+    extractAssetUrl(nestedUser?.profile_picture),
+    extractAssetUrl(nestedUser?.profile_photo),
+    extractAssetUrl(nestedUser?.profile_photo_url),
+    extractAssetUrl(nestedUser?.image),
+    extractAssetUrl(nestedUser?.image_url),
+    extractAssetUrl(nestedUser?.photo),
+    extractAssetUrl(nestedUser?.photo_url),
+    extractAssetUrl(nestedUser?.upload_image),
+    extractAssetUrl(nestedUser?.uploaded_image)
+  );
+
+  const banner = firstDefined(
+    extractAssetUrl(source?.banner),
+    extractAssetUrl(source?.banner_url),
+    extractAssetUrl(source?.banner_image),
+    extractAssetUrl(source?.banner_image_url),
+    extractAssetUrl(source?.cover),
+    extractAssetUrl(source?.cover_url),
+    extractAssetUrl(source?.cover_image),
+    extractAssetUrl(source?.cover_image_url),
+    extractAssetUrl(source?.cover_photo),
+    extractAssetUrl(source?.cover_photo_url),
+    extractAssetUrl(source?.header_image),
+    extractAssetUrl(source?.header_image_url),
+    extractAssetUrl(source?.background_image),
+    extractAssetUrl(source?.background_image_url),
+    extractAssetUrl(source?.uploaded_cover),
+    extractAssetUrl(source?.upload_cover),
+
+    extractAssetUrl(nestedUser?.banner),
+    extractAssetUrl(nestedUser?.banner_url),
+    extractAssetUrl(nestedUser?.banner_image),
+    extractAssetUrl(nestedUser?.banner_image_url),
+    extractAssetUrl(nestedUser?.cover),
+    extractAssetUrl(nestedUser?.cover_url),
+    extractAssetUrl(nestedUser?.cover_image),
+    extractAssetUrl(nestedUser?.cover_image_url),
+    extractAssetUrl(nestedUser?.cover_photo),
+    extractAssetUrl(nestedUser?.cover_photo_url),
+    extractAssetUrl(nestedUser?.header_image),
+    extractAssetUrl(nestedUser?.header_image_url),
+    extractAssetUrl(nestedUser?.background_image),
+    extractAssetUrl(nestedUser?.background_image_url),
+    extractAssetUrl(nestedUser?.uploaded_cover),
+    extractAssetUrl(nestedUser?.upload_cover)
+  );
+
+  const bio = firstDefined(
+    source?.bio,
+    source?.description,
+    source?.about,
+    nestedUser?.bio,
+    nestedUser?.description,
+    nestedUser?.about
+  );
+
+  const location = firstDefined(
+    source?.location,
+    source?.city,
+    nestedUser?.location,
+    nestedUser?.city
+  );
+
+  const website = firstDefined(
+    source?.website,
+    source?.site_url,
+    nestedUser?.website,
+    nestedUser?.site_url
+  );
+
+  const isVerified = Boolean(
+    firstDefined(
+      source?.is_verified,
+      source?.verified,
+      nestedUser?.is_verified,
+      nestedUser?.verified,
+      false
+    )
+  );
+
+  const isSubscribed = Boolean(
+    firstDefined(
+      subscriptionLayer?.is_subscribed,
+      subscriptionLayer?.subscribed,
+      source?.is_subscribed,
+      source?.subscribed,
+      nestedUser?.is_subscribed,
+      nestedUser?.subscribed,
+      false
+    )
+  );
+
+  const subscriptionPrice = Number(
+    firstDefined(
+      subscriptionLayer?.subscription_price,
+      subscriptionLayer?.price,
+      subscriptionLayer?.monthly_price,
+      source?.subscription_price,
+      source?.price,
+      source?.monthly_price,
+      nestedUser?.subscription_price,
+      nestedUser?.price,
+      nestedUser?.monthly_price,
+      0
+    ) || 0
+  );
+
+  const subscribersCount = Number(
+    firstDefined(
+      source?.subscribers_count,
+      source?.subscriber_count,
+      source?.subscribers,
+      nestedUser?.subscribers_count,
+      nestedUser?.subscriber_count,
+      nestedUser?.subscribers,
+      0
+    ) || 0
+  );
+
+  const postsCount = Number(
+    firstDefined(
+      source?.posts_count,
+      source?.total_posts,
+      source?.post_count,
+      nestedUser?.posts_count,
+      nestedUser?.total_posts,
+      nestedUser?.post_count,
+      0
+    ) || 0
+  );
+
+  const mediaCount = Number(
+    firstDefined(
+      source?.media_count,
+      source?.total_media,
+      source?.media_total,
+      nestedUser?.media_count,
+      nestedUser?.total_media,
+      nestedUser?.media_total,
+      0
+    ) || 0
+  );
+
+  return {
+    raw,
+    creator_raw: source,
+    subscription_raw: subscriptionLayer,
+    id,
+    username,
+    display_name: displayName,
+    avatar,
+    banner,
+    bio,
+    location,
+    website,
+    is_verified: isVerified,
+    is_subscribed: isSubscribed,
+    subscription_price: subscriptionPrice,
+    subscribers_count: subscribersCount,
+    posts_count: postsCount,
+    media_count: mediaCount,
+  };
+}
+
+function normalizePosts(data: any) {
+  const list = Array.isArray(data)
+    ? data
+    : data?.data ||
+      data?.items ||
+      data?.posts ||
+      data?.results ||
+      data?.rows ||
+      [];
+
+  return safeArray(list).map((p: any) => ({
+    ...p,
+    is_ppv: Boolean(
+      p?.is_ppv ||
+        p?.ppv ||
+        p?.is_paid ||
+        p?.paid_post ||
+        p?.locked ||
+        p?.is_locked
+    ),
+    is_locked: Boolean(
+      p?.is_locked ||
+        p?.locked ||
+        p?.is_ppv ||
+        p?.ppv ||
+        p?.is_paid ||
+        p?.paid_post ||
+        (!p?.is_free && p?.is_free !== undefined)
+    ),
+  }));
+}
+
+function isPPVPost(post: any) {
+  return Boolean(
+    post?.is_ppv ||
+      post?.ppv ||
+      post?.is_paid ||
+      post?.paid_post ||
+      post?.locked ||
+      post?.is_locked ||
+      (!post?.is_free && post?.is_free !== undefined)
+  );
+}
+
+function pushMediaItem(store: any[], rawUrl: any, rawType?: any) {
+  const extractedUrl = extractAssetUrl(rawUrl);
+  if (!extractedUrl || typeof extractedUrl !== "string") return;
+
+  const cleanUrl = extractedUrl.trim();
+  if (!cleanUrl) return;
+
+  const isVideo =
+    String(rawType || "").toLowerCase().includes("video") ||
+    /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(cleanUrl);
+
+  const isImage =
+    /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/i.test(cleanUrl) ||
+    cleanUrl.includes("/media/") ||
+    cleanUrl.includes("/uploads/") ||
+    cleanUrl.includes("/images/") ||
+    cleanUrl.startsWith("media/") ||
+    cleanUrl.startsWith("uploads/");
+
+  if (!isVideo && !isImage) return;
+
+  store.push({
+    url: cleanUrl,
+    type: isVideo ? "video" : "image",
+  });
+}
+
+function scanForMedia(value: any, store: any[], visited = new WeakSet()) {
+  if (!value) return;
+
+  if (typeof value === "string") {
+    pushMediaItem(store, value);
+    return;
+  }
+
+  if (typeof value !== "object") return;
+  if (visited.has(value)) return;
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => scanForMedia(item, store, visited));
+    return;
+  }
+
+  const mediaKeys = [
+    "url",
+    "file",
+    "src",
+    "path",
+    "media_url",
+    "image",
+    "image_url",
+    "photo",
+    "photo_url",
+    "thumbnail",
+    "thumbnail_url",
+    "poster",
+    "cover",
+    "cover_photo",
+    "cover_photo_url",
+    "cover_image",
+    "cover_image_url",
+    "banner",
+    "banner_url",
+    "banner_image",
+    "banner_image_url",
+    "avatar",
+    "avatar_url",
+    "profile_image",
+    "profile_image_url",
+    "profile_picture",
+    "profile_photo",
+    "profile_photo_url",
+    "upload_image",
+    "video",
+    "video_url",
+    "preview_url",
+  ];
+
+  mediaKeys.forEach((key) => {
+    if (key in value) {
+      pushMediaItem(store, value[key], value.type || value.media_type || key);
+    }
+  });
+
+  Object.entries(value).forEach(([key, val]) => {
+    const lowerKey = key.toLowerCase();
+
+    if (
+      lowerKey.includes("image") ||
+      lowerKey.includes("img") ||
+      lowerKey.includes("photo") ||
+      lowerKey.includes("thumbnail") ||
+      lowerKey.includes("poster") ||
+      lowerKey.includes("video") ||
+      lowerKey.includes("media") ||
+      lowerKey.includes("file") ||
+      lowerKey.includes("attachment") ||
+      lowerKey.includes("gallery") ||
+      lowerKey.includes("asset") ||
+      lowerKey.includes("upload") ||
+      lowerKey.includes("avatar") ||
+      lowerKey.includes("cover") ||
+      lowerKey.includes("banner")
+    ) {
+      if (typeof val === "string") {
+        pushMediaItem(store, val, lowerKey);
+      } else {
+        scanForMedia(val, store, visited);
+      }
+    }
+  });
+
+  Object.values(value).forEach((val) => {
+    if (typeof val === "object") {
+      scanForMedia(val, store, visited);
+    }
+  });
+}
+
+function getPostMedia(post: any) {
+  const mediaItems: any[] = [];
+  scanForMedia(post, mediaItems);
+
+  return mediaItems.filter(
+    (item, index, arr) =>
+      item?.url &&
+      arr.findIndex((x) => x.url === item.url && x.type === item.type) === index
+  );
+}
+
+export default function UserPage() {
+  const params = useParams();
+  const routeValue = String(params?.username || "").trim();
+
+  const [creator, setCreator] = useState<any>(null);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [subscribed, setSubscribed] = useState(false);
+  const [subLoading, setSubLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>("posts");
+  const [notFound, setNotFound] = useState(false);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+  const [bannerBroken, setBannerBroken] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setNotFound(false);
+      setAvatarBroken(false);
+      setBannerBroken(false);
+
+      try {
+        let profile: any = null;
+
+        try {
+          profile = await browseApi.getCreatorProfile(routeValue);
+        } catch {
+          profile = null;
+        }
+
+        const normalizedCreator = normalizeCreator(profile);
+
+        if (
+          !normalizedCreator?.id &&
+          !normalizedCreator?.username &&
+          !normalizedCreator?.display_name
+        ) {
+          setNotFound(true);
+          setCreator(null);
+          setPosts([]);
+          return;
+        }
+
+        setCreator(normalizedCreator);
+        setSubscribed(normalizedCreator?.is_subscribed || false);
+
+        const postLookupId =
+          normalizedCreator?.id || normalizedCreator?.username || routeValue;
+
+        let postsData: any = [];
+        try {
+          postsData = await browseApi.getCreatorPosts(postLookupId);
+        } catch {
+          postsData = [];
+        }
+
+        const normalized = normalizePosts(postsData);
+        setPosts(normalized);
+
+        console.log("Creator profile response:", profile);
+        console.log("Normalized creator:", normalizedCreator);
+        console.log("Creator raw object:", normalizedCreator.creator_raw);
+        console.log("Creator banner value:", normalizedCreator.banner);
+        console.log("Creator avatar value:", normalizedCreator.avatar);
+      } catch (e: any) {
+        if (
+          e?.message?.includes("404") ||
+          e?.message?.toLowerCase?.().includes("not found")
+        ) {
+          setNotFound(true);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (routeValue) {
+      load();
+    }
+  }, [routeValue]);
+
+  const handleSubscribe = async () => {
+    if (!creator?.id && !creator?.username) return;
+
+    setSubLoading(true);
+    try {
+      const targetId = creator?.id || creator?.username;
+
+      if (subscribed) {
+        await subscriptionsApi.unsubscribe(targetId);
+        setSubscribed(false);
+      } else {
+        await subscriptionsApi.subscribe(targetId);
+        setSubscribed(true);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Action failed");
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  const handleStartChat = async () => {
+    try {
+      const targetId = creator?.id || creator?.username || routeValue;
+      await messagesApi.startConversation(targetId);
+      window.location.href = "/chat";
+    } catch {}
+  };
+
+  const allMedia = useMemo(() => {
+    return posts.flatMap((p: any, postIndex: number) =>
+      getPostMedia(p).map((m: any, mediaIndex: number) => ({
+        ...m,
+        originalUrl: m.url,
+        src: mediaUrl(m.url),
+        postId: p?.id || `post-${postIndex}`,
+        id: `${p?.id || postIndex}-${mediaIndex}`,
+      }))
+    );
+  }, [posts]);
+
+  if (loading) return <Spinner text="Loading profile..." />;
+
+  if (notFound || !creator) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-5xl font-black text-gray-200 mb-3">404</p>
+          <p className="text-gray-500 mb-4">Creator not found</p>
+          <Link href="/home" className="text-[#e8125c] text-sm hover:underline">
+            ← Go Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const displayName = creator?.display_name || creator?.username || "User";
+  const username = creator?.username || "unknown";
+  const price = Number(creator?.subscription_price || 0);
+  const subCount = Number(creator?.subscribers_count || 0);
+  const postsCount = Number(creator?.posts_count || posts.length || 0);
+  const mediaCount = Number(creator?.media_count || allMedia.length || 0);
+
+  const avatarSrc =
+    !avatarBroken && creator?.avatar ? mediaUrl(creator.avatar) : null;
+
+  const bannerSrc =
+    !bannerBroken && creator?.banner ? mediaUrl(creator.banner) : null;
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <div className="relative h-48 overflow-hidden bg-gradient-to-r from-pink-400 via-rose-400 to-red-400">
+        {bannerSrc && (
+          <img
+            src={bannerSrc}
+            alt="Cover"
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setBannerBroken(true)}
+          />
+        )}
+        <div className="absolute inset-0 bg-black/15" />
+      </div>
+
+      <div className="relative bg-white px-6 pt-16 pb-0 shadow-sm">
+        <div className="absolute left-6 -top-12 z-10">
+          {avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt={displayName}
+              className="w-24 h-24 rounded-full object-cover object-center border-4 border-white shadow-md bg-white"
+              onError={() => setAvatarBroken(true)}
+            />
+          ) : (
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 border-4 border-white shadow-md flex items-center justify-center text-white text-2xl font-bold">
+              {displayName?.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end mb-4">
+          <button className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+            <Bell size={18} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="mb-3">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-gray-900">{displayName}</h1>
+            {creator?.is_verified && (
+              <BadgeCheck size={20} className="text-[#e8125c]" />
+            )}
+          </div>
+          <p className="text-sm text-gray-400">@{username}</p>
+        </div>
+
+        <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
+          <span>
+            <strong className="text-gray-900">{subCount}</strong> Subscribers
+          </span>
+          <span className="text-gray-200">|</span>
+          <span>
+            <strong className="text-gray-900">{postsCount}</strong> Posts
+          </span>
+          <span className="text-gray-200">|</span>
+          <span>
+            <strong className="text-gray-900">{mediaCount}</strong> Media
+          </span>
+        </div>
+
+        {creator?.bio && (
+          <p className="text-sm text-gray-600 mb-5 leading-relaxed">
+            {creator.bio}
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <button
+            onClick={handleStartChat}
+            className="flex items-center justify-center gap-2 py-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-sm font-medium text-gray-700 border border-gray-200 transition-colors"
+          >
+            <MessageCircle size={18} />
+            Chat
+          </button>
+
+          <Link
+            href="/payments"
+            className="flex items-center justify-center gap-2 py-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-sm font-medium text-gray-700 border border-gray-200 transition-colors"
+          >
+            <Wallet size={18} />
+            Wallet
+          </Link>
+        </div>
+
+        {!subscribed ? (
+          <div className="mb-5">
+            <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4 mb-3">
+              <h3 className="font-bold text-gray-900 mb-1">
+                🔓 Unlock Premium Content
+              </h3>
+              <p className="text-xs text-gray-500 mb-3">
+                Subscribe to get access to exclusive posts, photos, and more.
+              </p>
+              <button
+                onClick={handleSubscribe}
+                disabled={subLoading}
+                className="w-full py-3 bg-[#e8125c] hover:bg-[#c4104f] text-white font-semibold rounded-xl transition-colors text-sm shadow-sm shadow-pink-200 flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {subLoading && <Loader2 size={16} className="animate-spin" />}
+                {price > 0 ? `Subscribe For $${price}/Month` : "Subscribe Free"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-5">
+            <button
+              onClick={handleSubscribe}
+              disabled={subLoading}
+              className="w-full py-3 bg-green-50 border border-green-200 text-green-700 font-semibold rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {subLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <BadgeCheck size={18} />
+              )}
+              {subLoading
+                ? "Updating..."
+                : `Subscribed${price > 0 ? ` · $${price}/mo` : ""}`}
+            </button>
+          </div>
+        )}
+
+        <div className="flex border-b border-gray-100">
+          {(["posts", "media", "about"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-3 text-sm font-medium capitalize transition-colors flex items-center justify-center gap-1.5 ${
+                activeTab === tab
+                  ? "text-[#e8125c] border-b-2 border-[#e8125c]"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              {tab === "posts" && <FileText size={15} />}
+              {tab === "media" && <ImageIcon size={15} />}
+              {tab === "about" && <Grid3X3 size={15} />}
+              {tab === "media" ? "Photos" : tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-4 py-6">
+        {activeTab === "posts" &&
+          (posts.length > 0 ? (
+            posts.map((post, index) => (
+              <PostCard key={post?.id || index} post={post} />
+            ))
+          ) : (
+            <p className="text-center text-gray-400 py-12 text-sm">
+              No posts yet
+            </p>
+          ))}
+
+        {activeTab === "media" && (
+          <div>
+            {allMedia.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {allMedia.map((item: any) => {
+                  const relatedPost = posts.find((p: any) => p.id === item.postId);
+                  const isLocked = isPPVPost(relatedPost);
+
+                  return (
+                    <div key={item.id} className="rounded-xl overflow-hidden">
+                      <div className="aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200 relative">
+                        {item.type === "video" ? (
+                          <>
+                            <video
+                              src={item.src}
+                              className={`w-full h-full object-cover ${
+                                isLocked ? "blur-xl brightness-75 scale-105" : ""
+                              }`}
+                              controls={!isLocked}
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                            {!isLocked && (
+                              <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1">
+                                <Play size={14} />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <img
+                            src={item.src}
+                            alt="Creator media"
+                            className={`w-full h-full object-cover ${
+                              isLocked ? "blur-xl brightness-75 scale-105" : ""
+                            }`}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src =
+                                "/placeholder.jpg";
+                            }}
+                          />
+                        )}
+
+                        {isLocked && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <div className="bg-white/90 px-3 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                              <Lock size={12} />
+                              Paid Preview
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center text-gray-400 py-12 text-sm">
+                No photos or videos yet
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "about" && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <h3 className="font-bold text-gray-900 mb-3">About creator</h3>
+            <p className="text-sm text-gray-600 leading-relaxed mb-6">
+              {creator?.bio || "No bio provided."}
+            </p>
+
+            <div className="space-y-3">
+              {[
+                { label: "ID", value: creator?.id || "-" },
+                {
+                  label: "Username",
+                  value: creator?.username ? `@${creator.username}` : "-",
+                },
+                { label: "Display Name", value: creator?.display_name || "-" },
+                { label: "Subscribers", value: subCount },
+                { label: "Total Posts", value: postsCount },
+                { label: "Total Media", value: mediaCount },
+                {
+                  label: "Subscription Price",
+                  value: price > 0 ? `$${price}/month` : "Free",
+                },
+                creator?.location
+                  ? { label: "Location", value: creator.location }
+                  : null,
+                creator?.website
+                  ? { label: "Website", value: creator.website }
+                  : null,
+              ]
+                .filter(Boolean)
+                .map((row: any) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 gap-4"
+                  >
+                    <span className="text-sm text-gray-500">{row.label}</span>
+                    <span className="text-sm font-semibold text-gray-900 text-right break-all">
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
