@@ -35,9 +35,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-14 h-14 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-pink-200">
-            <span className="text-white font-black text-xl">C</span>
+            <span className="text-white font-black text-xl">S</span>
           </div>
-          <h1 className="text-2xl font-black text-gray-900">CreatorHub</h1>
+          <h1 className="text-2xl font-black text-gray-900">Soulmodel</h1>
           <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
         </div>
 
@@ -64,9 +64,19 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-gray-700">
+                  Password
+                </label>
+
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-[#e8125c] font-medium hover:underline"
+                >
+                  Forgot Password?
+                </Link>
+              </div>
+
               <div className="relative">
                 <input
                   type={showPw ? "text" : "password"}
@@ -97,7 +107,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-sm text-gray-500 mt-6">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/register" className="text-[#e8125c] font-semibold hover:underline">
               Sign up
             </Link>

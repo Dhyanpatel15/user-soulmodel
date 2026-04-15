@@ -50,9 +50,9 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-14 h-14 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-pink-200">
-            <span className="text-white font-black text-xl">C</span>
+            <span className="text-white font-black text-xl">S</span>
           </div>
-          <h1 className="text-2xl font-black text-gray-900">Join CreatorHub</h1>
+          <h1 className="text-2xl font-black text-gray-900">Join Soulmodel</h1>
           <p className="text-gray-500 text-sm mt-1">Create your account</p>
         </div>
 

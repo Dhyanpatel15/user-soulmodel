@@ -7,25 +7,34 @@ import Sidebar from "./Sidebar";
 import BottomNav from "./Bottomnav";
 import MobileHeader from "./Mobileheder";
 
-const PUBLIC_ROUTES = ["/login", "/register"];
+// ✅ Updated public routes
+const PUBLIC_ROUTES = [
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+];
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
-  const isPublic = PUBLIC_ROUTES.includes(pathname);
+  // ✅ Handle dynamic reset-password (with token)
+  const isPublic =
+    PUBLIC_ROUTES.includes(pathname) ||
+    pathname.startsWith("/reset-password");
 
-  // Redirect to login if not authenticated
+  // ✅ Redirect unauthenticated users ONLY for protected routes
   useEffect(() => {
     if (!loading && !user && !isPublic) {
       router.replace("/login");
     }
   }, [loading, user, isPublic, router]);
 
-  // Scroll to top on route change
+  // ✅ Scroll to top on route change
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, [pathname]);
 
   // ── Loading state ──
@@ -40,35 +49,36 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     );
   }
 
-  // ── Public routes (login / register) — no layout ──
+  // ── Public routes (NO layout UI) ──
   if (isPublic) {
     return <>{children}</>;
   }
 
-  // ── Not authenticated yet (brief flash prevention) ──
+  // ── Prevent flash if not authenticated ──
   if (!user) return null;
 
+  // ── Protected layout ──
   return (
     <div className="flex min-h-screen bg-gray-50">
 
-      {/* Desktop Sidebar: md+ only */}
+      {/* Desktop Sidebar */}
       <div className="hidden md:block">
         <Sidebar />
       </div>
 
-      {/* Main content area */}
+      {/* Main Content */}
       <div className="flex-1 md:ml-64 flex flex-col min-h-screen">
 
-        {/* Mobile header: visible on mobile only */}
+        {/* Mobile Header */}
         <MobileHeader />
 
-        {/* Page content */}
+        {/* Page Content */}
         <main className="flex-1 bg-gray-50 pb-20 md:pb-6">
           {children}
         </main>
       </div>
 
-      {/* Mobile bottom nav: visible on mobile only */}
+      {/* Mobile Bottom Navigation */}
       <div className="md:hidden">
         <BottomNav />
       </div>

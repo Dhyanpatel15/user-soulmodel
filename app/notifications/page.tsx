@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { notificationsApi, mediaUrl } from "@/lib/api";
+import { notificationsApi, mediaUrl, financeApi } from "@/lib/api";
 import {
   Heart,
   UserPlus,
   DollarSign,
   MessageCircle,
   Bell,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from "lucide-react";
 import Spinner from "@/components/Spinner";
 
@@ -25,6 +27,7 @@ type NotificationItem = {
   };
   metadata?: Record<string, any>;
   created_at?: string | null;
+  source?: "notification" | "transaction";
 };
 
 const PAGE_LIMIT = 20;
@@ -45,6 +48,12 @@ const iconMap: Record<string, { icon: any; color: string }> = {
   tip: { icon: DollarSign, color: "bg-green-100 text-green-500" },
   tip_received: { icon: DollarSign, color: "bg-green-100 text-green-500" },
   gift_received: { icon: DollarSign, color: "bg-green-100 text-green-500" },
+
+  transaction_credit: { icon: ArrowDownLeft, color: "bg-green-100 text-green-600" },
+  transaction_debit: { icon: ArrowUpRight, color: "bg-red-100 text-red-500" },
+  deposit: { icon: ArrowDownLeft, color: "bg-green-100 text-green-600" },
+  payment: { icon: ArrowUpRight, color: "bg-red-100 text-red-500" },
+  ppv: { icon: ArrowUpRight, color: "bg-red-100 text-red-500" },
 
   message: { icon: MessageCircle, color: "bg-indigo-100 text-indigo-500" },
   new_message: { icon: MessageCircle, color: "bg-indigo-100 text-indigo-500" },
@@ -102,6 +111,58 @@ function SenderAvatar({ notification }: { notification: NotificationItem }) {
   );
 }
 
+function formatTransactionMessage(tx: any) {
+  const flow = String(tx?.flow || "").toLowerCase();
+  const type = String(tx?.type || "transaction").toLowerCase();
+  const amount = Number(tx?.amount || 0).toFixed(2);
+
+  if (flow === "credit") {
+    if (type === "deposit") return `Wallet credited with $${amount}`;
+    return `Received $${amount} in wallet`;
+  }
+
+  if (type === "subscription") return `Subscription payment of $${amount}`;
+  if (type === "ppv") return `Paid $${amount} to unlock content`;
+  if (type === "gift") return `Sent a gift of $${amount}`;
+  if (type === "payment") return `Payment of $${amount} completed`;
+
+  return `Wallet debited by $${amount}`;
+}
+
+function normalizeTransactionAsNotification(tx: any): NotificationItem {
+  const flow = String(tx?.flow || "").toLowerCase();
+  const type = String(tx?.type || "transaction").toLowerCase();
+
+  return {
+    id: `tx-${tx?.id}-${type}`,
+    type: flow === "credit" ? "transaction_credit" : "transaction_debit",
+    text: formatTransactionMessage(tx),
+    is_read: true,
+    action_url: "",
+    sender: {
+      id: tx?.creator?.id || tx?.recipient?.id || "",
+      username:
+        tx?.creator?.username ||
+        tx?.recipient?.username ||
+        "",
+      display_name:
+        tx?.creator?.display_name ||
+        tx?.recipient?.display_name ||
+        (flow === "credit" ? "Wallet" : "Transaction"),
+      avatar_url:
+        tx?.creator?.avatar_url ||
+        tx?.recipient?.avatar_url ||
+        "",
+    },
+    metadata: {
+      ...tx,
+      original_type: type,
+    },
+    created_at: tx?.created_at || null,
+    source: "transaction",
+  };
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +171,28 @@ export default function NotificationsPage() {
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
+
+  const mergeAndSortItems = (
+    notifItems: NotificationItem[],
+    txItems: any[]
+  ): NotificationItem[] => {
+    const transactionNotifications = txItems.map(normalizeTransactionAsNotification);
+
+    const merged = [...notifItems, ...transactionNotifications];
+
+    const unique = merged.filter(
+      (item, index, self) =>
+        index === self.findIndex((x) => String(x.id) === String(item.id))
+    );
+
+    unique.sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    return unique;
+  };
 
   const loadNotifications = async (nextOffset = 0, append = false) => {
     try {
@@ -120,25 +203,24 @@ export default function NotificationsPage() {
         setError("");
       }
 
-      const response = await notificationsApi.getNotifications(
-        PAGE_LIMIT,
-        nextOffset
-      );
+      const [response, allTransactions] = await Promise.all([
+        notificationsApi.getNotifications(PAGE_LIMIT, nextOffset),
+        financeApi.getAllTransactions().catch(() => []),
+      ]);
 
-      console.log("notifications response:", response);
-
-      const items = Array.isArray(response?.data) ? response.data : [];
+      const notifItems = Array.isArray(response?.data) ? response.data : [];
       const more = Boolean(response?.pagination?.has_more);
 
-      setNotifications((prev) => {
-        if (!append) return items;
+      const mergedItems = mergeAndSortItems(notifItems, allTransactions);
 
-        const merged = [...prev, ...items];
-        const unique = merged.filter(
+      setNotifications((prev) => {
+        if (!append) return mergedItems;
+
+        const appended = [...prev, ...mergedItems];
+        return appended.filter(
           (item, index, self) =>
             index === self.findIndex((x) => String(x.id) === String(item.id))
         );
-        return unique;
       });
 
       setHasMore(more);
@@ -180,7 +262,9 @@ export default function NotificationsPage() {
     };
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const unreadCount = notifications.filter(
+    (n) => !n.is_read && n.source !== "transaction"
+  ).length;
 
   const handleMarkAllRead = async () => {
     try {
@@ -190,7 +274,7 @@ export default function NotificationsPage() {
       setNotifications((prev) =>
         prev.map((n) => ({
           ...n,
-          is_read: true,
+          is_read: n.source === "transaction" ? true : true,
         }))
       );
     } catch (err) {
@@ -201,7 +285,11 @@ export default function NotificationsPage() {
   };
 
   const handleNotificationClick = async (notification: NotificationItem) => {
-    if (!notification.is_read && notification.id) {
+    if (
+      notification.source !== "transaction" &&
+      !notification.is_read &&
+      notification.id
+    ) {
       try {
         await notificationsApi.markRead(notification.id);
 
@@ -320,7 +408,7 @@ export default function NotificationsPage() {
                     </p>
                   </div>
 
-                  {!isRead && (
+                  {!isRead && n.source !== "transaction" && (
                     <div className="w-2.5 h-2.5 rounded-full bg-[#e8125c] flex-shrink-0" />
                   )}
                 </button>

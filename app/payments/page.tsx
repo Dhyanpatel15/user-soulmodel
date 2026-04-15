@@ -1,12 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { paymentsApi, walletApi, mediaUrl, unwrapList, unwrapItem } from "@/lib/api";
-import { CheckCircle, XCircle, CreditCard, Wallet, Plus, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  paymentsApi,
+  walletApi,
+  mediaUrl,
+  unwrapItem,
+} from "@/lib/api";
+import {
+  CheckCircle,
+  XCircle,
+  CreditCard,
+  Wallet,
+  Plus,
+  Loader2,
+  ArrowDownLeft,
+  ArrowUpRight,
+} from "lucide-react";
 import Spinner from "@/components/Spinner";
+
+type TransactionItem = {
+  id: string | number;
+  type: "credit" | "debit";
+  amount: number;
+  status: string;
+  title: string;
+  subtitle?: string;
+  created_at?: string | null;
+  avatar?: string;
+};
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
+  const [walletTransactions, setWalletTransactions] = useState<any[]>([]);
   const [wallet, setWallet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [depositAmount, setDepositAmount] = useState("");
@@ -15,17 +41,17 @@ export default function PaymentsPage() {
 
   const loadData = async () => {
     setLoading(true);
+
     try {
-      const [paymentsRes, walletRes] = await Promise.all([
-        paymentsApi.getPaymentHistory().catch(() => null),
+      const [paymentsRes, walletRes, txRes] = await Promise.all([
+        paymentsApi.getPaymentHistory().catch(() => []),
         walletApi.getWallet().catch(() => null),
+        walletApi.getTransactions().catch(() => []),
       ]);
 
-      const paymentsList = unwrapList(paymentsRes);
-      const walletItem = walletRes ? unwrapItem(walletRes) : null;
-
-      setPayments(paymentsList);
-      setWallet(walletItem);
+      setPayments(Array.isArray(paymentsRes) ? paymentsRes : []);
+      setWalletTransactions(Array.isArray(txRes) ? txRes : []);
+      setWallet(walletRes ? unwrapItem(walletRes) : null);
     } finally {
       setLoading(false);
     }
@@ -49,20 +75,22 @@ export default function PaymentsPage() {
     try {
       const depositRes = await walletApi.deposit(amount);
 
-      // If backend returns updated wallet directly
       const maybeWallet = depositRes?.wallet || depositRes?.data?.wallet || null;
 
       if (maybeWallet) {
         setWallet(maybeWallet);
       } else {
-        // safest option: reload wallet from server after deposit
         const freshWallet = await walletApi.getWallet().catch(() => null);
         setWallet(freshWallet ? unwrapItem(freshWallet) : wallet);
       }
 
-      // optionally refresh history too
-      const freshPayments = await paymentsApi.getPaymentHistory().catch(() => null);
-      setPayments(unwrapList(freshPayments));
+      const [freshPayments, freshTransactions] = await Promise.all([
+        paymentsApi.getPaymentHistory().catch(() => []),
+        walletApi.getTransactions().catch(() => []),
+      ]);
+
+      setPayments(Array.isArray(freshPayments) ? freshPayments : []);
+      setWalletTransactions(Array.isArray(freshTransactions) ? freshTransactions : []);
 
       setDepositMsg(`Successfully deposited $${amount.toFixed(2)}`);
       setDepositAmount("");
@@ -73,24 +101,124 @@ export default function PaymentsPage() {
     }
   };
 
-  const totalSpent = payments
-    .filter((p) =>
-      ["paid", "completed", "success"].includes(String(p?.status || "").toLowerCase())
-    )
-    .reduce((acc, p) => acc + Number(p?.amount || 0), 0);
+  const normalizedTransactions = useMemo<TransactionItem[]>(() => {
+    const successfulStatuses = ["paid", "completed", "success", "succeeded"];
+    const creditKeywords = ["credit", "deposit", "topup", "top_up", "refund", "added"];
+    const debitKeywords = ["debit", "spent", "payment", "purchase", "subscription", "unlock", "deducted"];
+
+    const walletTxList: TransactionItem[] = walletTransactions.map((tx: any, index: number) => {
+      const rawType = String(
+        tx?.type ||
+        tx?.transaction_type ||
+        tx?.entry_type ||
+        tx?.kind ||
+        ""
+      ).toLowerCase();
+
+      const rawStatus = String(tx?.status || "success").toLowerCase();
+      const amount = Number(tx?.amount || 0);
+
+      const isCredit =
+        creditKeywords.some((k) => rawType.includes(k)) ||
+        amount > 0 && !debitKeywords.some((k) => rawType.includes(k));
+
+      const type: "credit" | "debit" = isCredit ? "credit" : "debit";
+
+      const title =
+        tx?.title ||
+        tx?.description ||
+        tx?.label ||
+        tx?.reason ||
+        (type === "credit" ? "Wallet Credit" : "Wallet Debit");
+
+      const subtitle =
+        tx?.note ||
+        tx?.message ||
+        tx?.reference ||
+        tx?.provider ||
+        "";
+
+      return {
+        id: tx?.id ?? `wallet-${index}`,
+        type,
+        amount: Math.abs(amount),
+        status: rawStatus,
+        title,
+        subtitle,
+        created_at: tx?.created_at || tx?.date || tx?.timestamp || null,
+        avatar: "",
+      };
+    });
+
+    const paymentList: TransactionItem[] = payments.map((pay: any, index: number) => {
+      const status = String(pay?.status || "paid").toLowerCase();
+      const creator = pay?.creator || pay?.recipient || {};
+      const creatorName =
+        creator?.display_name ||
+        creator?.full_name ||
+        creator?.username ||
+        pay?.creator_name ||
+        pay?.provider ||
+        "Payment";
+
+      const amount = Number(pay?.amount || 0);
+
+      return {
+        id: pay?.id ?? `payment-${index}`,
+        type: "debit",
+        amount: Math.abs(amount),
+        status,
+        title: creatorName,
+        subtitle: pay?.provider_transaction_id || pay?.provider || "Payment",
+        created_at: pay?.created_at || null,
+        avatar: creator?.avatar || creator?.avatar_url || "",
+      };
+    });
+
+    const merged = [...walletTxList, ...paymentList];
+
+    const uniqueMap = new Map<string, TransactionItem>();
+
+    for (const item of merged) {
+      const key = `${item.id}-${item.type}-${item.amount}-${item.created_at}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, item);
+      }
+    }
+
+    return Array.from(uniqueMap.values()).sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [payments, walletTransactions]);
+
+  const successfulStatuses = ["paid", "completed", "success", "succeeded"];
+
+  const totalCredited = normalizedTransactions
+    .filter((t) => t.type === "credit" && successfulStatuses.includes(t.status))
+    .reduce((acc, t) => acc + Number(t.amount || 0), 0);
+
+  const totalDebited = normalizedTransactions
+    .filter((t) => t.type === "debit" && successfulStatuses.includes(t.status))
+    .reduce((acc, t) => acc + Number(t.amount || 0), 0);
+
+  const totalSpent = totalDebited;
 
   if (loading) return <Spinner text="Loading payments..." />;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-1">Payments</h1>
-      <p className="text-gray-500 text-sm mb-8">Billing history and wallet</p>
+      <p className="text-gray-500 text-sm mb-8">
+        Wallet balance, credits, debits and full transaction history
+      </p>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-gradient-to-br from-[#e8125c] to-rose-500 text-white rounded-2xl p-5 shadow-md">
           <p className="text-white/70 text-xs uppercase tracking-wider mb-1">Total Spent</p>
           <p className="text-3xl font-bold">${totalSpent.toFixed(2)}</p>
-          <p className="text-white/60 text-xs mt-2">All time</p>
+          <p className="text-white/60 text-xs mt-2">All debit transactions</p>
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -102,6 +230,28 @@ export default function PaymentsPage() {
             ${Number(wallet?.balance ?? 0).toFixed(2)}
           </p>
           <p className="text-gray-400 text-xs mt-2">Available</p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-1">
+            <ArrowDownLeft size={16} className="text-green-600" />
+            <p className="text-gray-400 text-xs uppercase tracking-wider">Total Credited</p>
+          </div>
+          <p className="text-3xl font-bold text-green-600">
+            ${totalCredited.toFixed(2)}
+          </p>
+          <p className="text-gray-400 text-xs mt-2">All credits</p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-1">
+            <ArrowUpRight size={16} className="text-red-500" />
+            <p className="text-gray-400 text-xs uppercase tracking-wider">Total Debited</p>
+          </div>
+          <p className="text-3xl font-bold text-red-500">
+            ${totalDebited.toFixed(2)}
+          </p>
+          <p className="text-gray-400 text-xs mt-2">All debits</p>
         </div>
       </div>
 
@@ -182,47 +332,47 @@ export default function PaymentsPage() {
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-5 border-b border-gray-50">
-          <h2 className="font-semibold text-gray-800">Transaction History</h2>
+          <h2 className="font-semibold text-gray-800">All Transactions</h2>
         </div>
 
-        {payments.length === 0 ? (
-          <div className="text-center py-10 text-gray-400 text-sm">No transactions yet</div>
+        {normalizedTransactions.length === 0 ? (
+          <div className="text-center py-10 text-gray-400 text-sm">
+            No transactions yet
+          </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {payments.map((pay: any) => {
-              const status = String(pay?.status || "paid").toLowerCase();
-              const isSuccess = ["paid", "completed", "success"].includes(status);
-
-              const creator = pay?.creator || pay?.recipient || {};
-              const creatorName =
-                creator?.display_name ||
-                creator?.full_name ||
-                creator?.username ||
-                pay?.creator_name ||
-                pay?.provider ||
-                "Payment";
-
-              const avatar = creator?.avatar || creator?.avatar_url || "";
+            {normalizedTransactions.map((item) => {
+              const isSuccess = successfulStatuses.includes(String(item.status || "").toLowerCase());
+              const isCredit = item.type === "credit";
 
               return (
-                <div key={pay.id} className="flex items-center gap-4 px-5 py-4">
-                  {avatar ? (
+                <div key={`${item.id}-${item.type}-${item.created_at}`} className="flex items-center gap-4 px-5 py-4">
+                  {item.avatar ? (
                     <img
-                      src={mediaUrl(avatar)}
-                      alt={creatorName}
+                      src={mediaUrl(item.avatar)}
+                      alt={item.title}
                       className="w-10 h-10 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-[#e8125c] font-bold text-sm">
-                      {creatorName.slice(0, 2).toUpperCase()}
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                        isCredit
+                          ? "bg-green-100 text-green-600"
+                          : "bg-pink-100 text-[#e8125c]"
+                      }`}
+                    >
+                      {isCredit ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
                     </div>
                   )}
 
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-gray-900">{creatorName}</p>
-                    <p className="text-xs text-gray-400">
-                      {pay?.created_at
-                        ? new Date(pay.created_at).toLocaleDateString("en-US", {
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {item.subtitle || (isCredit ? "Money added to wallet" : "Money spent")}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {item.created_at
+                        ? new Date(item.created_at).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
@@ -232,16 +382,23 @@ export default function PaymentsPage() {
                   </div>
 
                   <div className="text-right">
-                    <p className="text-sm font-semibold text-gray-900">
-                      ${Number(pay?.amount || 0).toFixed(2)}
+                    <p
+                      className={`text-sm font-semibold ${
+                        isCredit ? "text-green-600" : "text-red-500"
+                      }`}
+                    >
+                      {isCredit ? "+" : "-"}${Number(item.amount || 0).toFixed(2)}
                     </p>
+
                     <div
                       className={`flex items-center gap-1 text-xs justify-end ${
                         isSuccess ? "text-green-500" : "text-red-500"
                       }`}
                     >
                       {isSuccess ? <CheckCircle size={11} /> : <XCircle size={11} />}
-                      <span className="capitalize">{status}</span>
+                      <span className="capitalize">
+                        {item.status || (isSuccess ? "success" : "failed")}
+                      </span>
                     </div>
                   </div>
                 </div>

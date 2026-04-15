@@ -69,9 +69,9 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2.5">
         <div className="w-8 h-8 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
-          <span className="text-white font-black text-sm">C</span>
+          <span className="text-white font-black text-sm">S</span>
         </div>
-        <span className="font-black text-gray-900 text-base tracking-tight">CreatorHub</span>
+        <span className="font-black text-gray-900 text-base tracking-tight">Soulmodel</span>
       </div>
 
       {/* User Profile */}

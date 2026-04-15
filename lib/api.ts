@@ -41,22 +41,78 @@ const getSafeNumber = (...values: any[]): number => {
   return 0;
 };
 
-// ✅ FIX: Proper error message handler
 const getErrorMessage = (err: any): string => {
   if (!err) return "";
 
   if (typeof err === "string") return err;
 
   if (typeof err === "object") {
-    return (
-      err.message ||
-      err.error ||
-      err.detail ||
-      JSON.stringify(err)
-    );
+    return err.message || err.error || err.detail || JSON.stringify(err);
   }
 
   return String(err);
+};
+
+const normalizeStatus = (status: any): string => {
+  const value = String(status || "").toLowerCase();
+
+  if (!value) return "success";
+  if (["paid", "completed", "success", "succeeded"].includes(value)) return "success";
+  if (["failed", "error", "cancelled", "canceled"].includes(value)) return "failed";
+  if (["pending", "processing"].includes(value)) return "pending";
+
+  return value;
+};
+
+const detectFlow = (item: any = {}): "credit" | "debit" => {
+  const explicitFlow = String(
+    item?.flow ||
+      item?.transaction_flow ||
+      item?.metadata_?.flow ||
+      item?.metadata?.flow ||
+      ""
+  ).toLowerCase();
+
+  if (explicitFlow === "credit" || explicitFlow === "debit") {
+    return explicitFlow;
+  }
+
+  const rawType = String(
+    item?.type ||
+      item?.transaction_type ||
+      item?.entry_type ||
+      item?.kind ||
+      ""
+  ).toLowerCase();
+
+  const creditTypes = [
+    "deposit",
+    "credit",
+    "refund",
+    "topup",
+    "top_up",
+    "wallet_credit",
+    "added",
+  ];
+
+  const debitTypes = [
+    "ppv",
+    "subscription",
+    "gift",
+    "unlock",
+    "payment",
+    "purchase",
+    "debit",
+    "spent",
+    "deducted",
+    "withdrawal",
+  ];
+
+  if (creditTypes.some((t) => rawType.includes(t))) return "credit";
+  if (debitTypes.some((t) => rawType.includes(t))) return "debit";
+
+  const amount = Number(item?.amount ?? 0);
+  return amount < 0 ? "debit" : "credit";
 };
 
 export const unwrapList = <T = any>(response: any): T[] => {
@@ -75,6 +131,8 @@ export const unwrapList = <T = any>(response: any): T[] => {
   if (Array.isArray(response?.data?.comments)) return response.data.comments;
   if (Array.isArray(response?.data?.items)) return response.data.items;
   if (Array.isArray(response?.data?.results)) return response.data.results;
+  if (Array.isArray(response?.data?.transactions)) return response.data.transactions;
+  if (Array.isArray(response?.data?.payments)) return response.data.payments;
   return [];
 };
 
@@ -91,11 +149,51 @@ export const unwrapItem = <T = any>(response: any): T => {
 };
 
 const normalizeCreator = (creator: any = {}) => {
-  const user = creator?.user || {};
+  const data = creator?.data || {};
+  const nestedCreator =
+    creator?.creator ||
+    data?.creator ||
+    creator?.profile ||
+    data?.profile ||
+    creator ||
+    {};
+
+  const subscription =
+    creator?.subscription ||
+    data?.subscription ||
+    nestedCreator?.subscription ||
+    {};
+
+  const user =
+    nestedCreator?.user ||
+    creator?.user ||
+    data?.user ||
+    {};
+
+  const subscriptionPrice = Number(
+    subscription?.subscription_price ??
+      subscription?.price ??
+      subscription?.monthly_price ??
+      nestedCreator?.subscription_price ??
+      nestedCreator?.price ??
+      nestedCreator?.monthly_price ??
+      creator?.subscription_price ??
+      creator?.price ??
+      creator?.monthly_price ??
+      user?.subscription_price ??
+      user?.price ??
+      user?.monthly_price ??
+      0
+  );
 
   return {
     ...creator,
+    ...nestedCreator,
+
     id:
+      nestedCreator?.id ??
+      nestedCreator?.creator_id ??
+      nestedCreator?.user_id ??
       creator?.id ??
       creator?.creator_id ??
       creator?.user_id ??
@@ -103,6 +201,9 @@ const normalizeCreator = (creator: any = {}) => {
       null,
 
     username:
+      nestedCreator?.username ||
+      nestedCreator?.user_name ||
+      nestedCreator?.handle ||
       creator?.username ||
       creator?.user_name ||
       creator?.handle ||
@@ -111,17 +212,25 @@ const normalizeCreator = (creator: any = {}) => {
       "",
 
     display_name:
+      nestedCreator?.display_name ||
+      nestedCreator?.full_name ||
+      nestedCreator?.name ||
       creator?.display_name ||
       creator?.full_name ||
       creator?.name ||
       user?.display_name ||
       user?.full_name ||
       user?.name ||
-      creator?.username ||
+      nestedCreator?.username ||
       user?.username ||
       "Creator",
 
     avatar_url:
+      nestedCreator?.avatar_url ||
+      nestedCreator?.avatar ||
+      nestedCreator?.profile_image ||
+      nestedCreator?.profile_picture ||
+      nestedCreator?.image ||
       creator?.avatar_url ||
       creator?.avatar ||
       creator?.profile_image ||
@@ -134,6 +243,11 @@ const normalizeCreator = (creator: any = {}) => {
       "",
 
     cover_photo_url:
+      nestedCreator?.cover_photo_url ||
+      nestedCreator?.cover_image ||
+      nestedCreator?.cover ||
+      nestedCreator?.banner ||
+      nestedCreator?.header_image ||
       creator?.cover_photo_url ||
       creator?.cover_image ||
       creator?.cover ||
@@ -146,27 +260,37 @@ const normalizeCreator = (creator: any = {}) => {
       "",
 
     is_verified: Boolean(
-      creator?.is_verified ||
-      creator?.verified ||
-      user?.is_verified ||
-      user?.verified
+      nestedCreator?.is_verified ||
+        nestedCreator?.verified ||
+        creator?.is_verified ||
+        creator?.verified ||
+        user?.is_verified ||
+        user?.verified
+    ),
+
+    is_subscribed: Boolean(
+      subscription?.is_subscribed ??
+        subscription?.subscribed ??
+        nestedCreator?.is_subscribed ??
+        nestedCreator?.subscribed ??
+        creator?.is_subscribed ??
+        creator?.subscribed ??
+        false
     ),
 
     is_free: Boolean(
-      creator?.is_free === true ||
-      user?.is_free === true ||
-      Number(creator?.subscription_price ?? creator?.price ?? user?.subscription_price ?? user?.price ?? 0) === 0
+      nestedCreator?.is_free === true ||
+        creator?.is_free === true ||
+        user?.is_free === true ||
+        subscriptionPrice === 0
     ),
 
-    subscription_price: Number(
-      creator?.subscription_price ??
-      creator?.price ??
-      user?.subscription_price ??
-      user?.price ??
-      0
-    ),
+    subscription_price: subscriptionPrice,
 
     bio:
+      nestedCreator?.bio ||
+      nestedCreator?.description ||
+      nestedCreator?.about ||
       creator?.bio ||
       creator?.description ||
       creator?.about ||
@@ -175,19 +299,24 @@ const normalizeCreator = (creator: any = {}) => {
       "",
 
     is_online: Boolean(
-      creator?.is_online ||
-      creator?.online ||
-      user?.is_online ||
-      user?.online
+      nestedCreator?.is_online ||
+        nestedCreator?.online ||
+        creator?.is_online ||
+        creator?.online ||
+        user?.is_online ||
+        user?.online
     ),
 
     subscribers_count: Number(
-      creator?.subscribers_count ??
-      creator?.total_subscribers ??
-      creator?.subscriber_count ??
-      user?.subscribers_count ??
-      user?.total_subscribers ??
-      0
+      nestedCreator?.subscribers_count ??
+        nestedCreator?.total_subscribers ??
+        nestedCreator?.subscriber_count ??
+        creator?.subscribers_count ??
+        creator?.total_subscribers ??
+        creator?.subscriber_count ??
+        user?.subscribers_count ??
+        user?.total_subscribers ??
+        0
     ),
   };
 };
@@ -234,13 +363,19 @@ const normalizeComment = (comment: any = {}) => {
 
 const normalizeCommentsList = (response: any) => {
   const list =
-    Array.isArray(response) ? response :
-    Array.isArray(response?.data) ? response.data :
-    Array.isArray(response?.items) ? response.items :
-    Array.isArray(response?.results) ? response.results :
-    Array.isArray(response?.comments) ? response.comments :
-    Array.isArray(response?.data?.comments) ? response.data.comments :
-    [];
+    Array.isArray(response)
+      ? response
+      : Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response?.items)
+          ? response.items
+          : Array.isArray(response?.results)
+            ? response.results
+            : Array.isArray(response?.comments)
+              ? response.comments
+              : Array.isArray(response?.data?.comments)
+                ? response.data.comments
+                : [];
 
   return list.map((item: any) => normalizeComment(item));
 };
@@ -308,14 +443,14 @@ export const normalizePost = (post: any = {}) => {
     comment_count: commentsCount,
     is_liked: Boolean(
       post?.is_liked ??
-      post?.liked ??
-      post?.viewer_has_liked ??
-      post?.meta?.is_liked
+        post?.liked ??
+        post?.viewer_has_liked ??
+        post?.meta?.is_liked
     ),
     is_bookmarked: Boolean(
       post?.is_bookmarked ??
-      post?.bookmarked ??
-      post?.viewer_has_bookmarked
+        post?.bookmarked ??
+        post?.viewer_has_bookmarked
     ),
     is_ppv,
     is_locked,
@@ -337,16 +472,94 @@ const normalizeWallet = (wallet: any = {}) => {
   };
 };
 
+export const normalizeTransaction = (tx: any = {}) => {
+  const flow = detectFlow(tx);
+  const rawAmount = Number(tx?.amount ?? tx?.transaction_amount ?? 0);
+  const amount = Math.abs(rawAmount);
+
+  return {
+    ...tx,
+    id: tx?.id ?? null,
+    type: String(
+      tx?.type ||
+        tx?.transaction_type ||
+        tx?.entry_type ||
+        tx?.kind ||
+        ""
+    ).toLowerCase(),
+    flow,
+    amount,
+    signed_amount: flow === "debit" ? -amount : amount,
+    currency: tx?.currency || "USD",
+    status: normalizeStatus(tx?.status),
+    title:
+      tx?.title ||
+      tx?.description ||
+      tx?.label ||
+      tx?.reason ||
+      (flow === "credit" ? "Wallet Credit" : "Wallet Debit"),
+    note:
+      tx?.note ||
+      tx?.message ||
+      tx?.metadata_?.note ||
+      tx?.metadata?.note ||
+      "",
+    reference_type: tx?.reference_type || null,
+    reference_id: tx?.reference_id ?? null,
+    creator_id: tx?.creator_id ?? null,
+    provider:
+      tx?.provider ||
+      tx?.metadata_?.provider ||
+      tx?.metadata?.provider ||
+      "",
+    provider_transaction_id:
+      tx?.provider_transaction_id ||
+      tx?.reference ||
+      tx?.metadata_?.payment_tx_id ||
+      tx?.metadata?.payment_tx_id ||
+      "",
+    created_at: tx?.created_at || tx?.date || tx?.timestamp || null,
+    metadata_: tx?.metadata_ || tx?.metadata || {},
+  };
+};
+
+const normalizeListOfTransactions = (response: any) => {
+  return unwrapList(response).map((item: any) => normalizeTransaction(item));
+};
+
 const normalizePayment = (payment: any = {}) => {
+  const rawAmount = Number(payment?.amount ?? payment?.transaction_amount ?? 0);
+  const flow = "debit";
+
   return {
     ...payment,
     id: payment?.id ?? null,
     provider: payment?.provider || "",
-    provider_transaction_id: payment?.provider_transaction_id || "",
-    amount: Number(payment?.amount ?? 0),
+    provider_transaction_id:
+      payment?.provider_transaction_id || payment?.reference || "",
+    amount: Math.abs(rawAmount),
+    signed_amount: -Math.abs(rawAmount),
     currency: payment?.currency || "USD",
-    status: String(payment?.status || "").toLowerCase(),
-    created_at: payment?.created_at || null,
+    status: normalizeStatus(payment?.status || payment?.payment_status),
+    type: String(
+      payment?.type ||
+        payment?.transaction_type ||
+        payment?.entry_type ||
+        payment?.kind ||
+        "payment"
+    ).toLowerCase(),
+    flow,
+    title:
+      payment?.title ||
+      payment?.description ||
+      payment?.label ||
+      payment?.reason ||
+      "Payment",
+    note:
+      payment?.note ||
+      payment?.message ||
+      "",
+    created_at: payment?.created_at || payment?.date || payment?.timestamp || null,
     creator: payment?.creator ? normalizeCreator(payment.creator) : payment?.creator,
     recipient: payment?.recipient ? normalizeCreator(payment.recipient) : payment?.recipient,
   };
@@ -396,13 +609,12 @@ export async function apiFetch<T = any>(
     throw new Error("Unauthorized");
   }
 
-  // ✅ FIXED ERROR HANDLING
   if (!res.ok) {
     throw new Error(
       getErrorMessage(responseData?.detail) ||
-      getErrorMessage(responseData?.message) ||
-      getErrorMessage(responseData?.error) ||
-      `Error ${res.status}`
+        getErrorMessage(responseData?.message) ||
+        getErrorMessage(responseData?.error) ||
+        `Error ${res.status}`
     );
   }
 
@@ -425,6 +637,15 @@ export const authApi = {
   }) => apiFetch("/auth/register", "POST", data),
 
   me: () => apiFetch("/user/profile/me"),
+
+  forgotPassword: (email: string) =>
+    apiFetch("/auth/forgot-password", "POST", { email }),
+
+  resetPassword: (token: string, new_password: string) =>
+    apiFetch("/auth/reset-password", "POST", {
+      token,
+      new_password,
+    }),
 };
 
 // ─── FEED ────────────────────────────────────────────────────────────────────
@@ -475,7 +696,7 @@ export const browseApi = {
 
   getCreatorProfile: async (creatorId: string | number) => {
     const res = await apiFetch(`/user/browse/creators/${creatorId}`);
-    const item = normalizeCreator(unwrapItem(res));
+    const item = normalizeCreator(res);
 
     return {
       ...(typeof res === "object" && res ? res : {}),
@@ -485,7 +706,7 @@ export const browseApi = {
 
   getCreatorProfileItem: async (creatorId: string | number) => {
     const res = await apiFetch(`/user/browse/creators/${creatorId}`);
-    return normalizeCreator(unwrapItem(res));
+    return normalizeCreator(res);
   },
 
   getCreatorPosts: async (
@@ -606,24 +827,24 @@ export const userProfileApi = {
   },
 
   updateMeWithAvatar: (
-  data: {
-    username?: string;
-    display_name?: string;
-    bio?: string;
-    phone?: string;
-    date_of_birth?: string;
+    data: {
+      username?: string;
+      display_name?: string;
+      bio?: string;
+      phone?: string;
+      date_of_birth?: string;
+    },
+    avatar?: File | null
+  ) => {
+    const formData = new FormData();
+    formData.append("profile_update", JSON.stringify(data));
+
+    if (avatar) {
+      formData.append("avatar", avatar);
+    }
+
+    return apiFetch("/user/profile/me", "PUT", formData, true);
   },
-  avatar?: File | null
-) => {
-  const formData = new FormData();
-  formData.append("profile_update", JSON.stringify(data));
-
-  if (avatar) {
-    formData.append("avatar", avatar);
-  }
-
-  return apiFetch("/user/profile/me", "PUT", formData, true);
-},
 
   updateMeWithFiles: (
     data: {
@@ -663,7 +884,6 @@ export const subscriptionsApi = {
   unsubscribe: (creatorId: string | number) =>
     apiFetch(`/user/subscriptions/creators/${creatorId}`, "DELETE"),
 };
-
 
 // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 export type NotificationItem = {
@@ -759,23 +979,32 @@ export const interactApi = {
   toggleLike: async (postId: string | number) => {
     const res = await apiFetch(`/user/interact/posts/${postId}/like`, "POST");
 
+    const rawLiked =
+      res?.liked ??
+      res?.is_liked ??
+      res?.data?.liked ??
+      res?.data?.is_liked;
+
+    const rawLikesCount =
+      res?.likes_count ??
+      res?.like_count ??
+      res?.total_likes ??
+      res?.data?.likes_count ??
+      res?.data?.like_count ??
+      res?.data?.total_likes;
+
     return {
       raw: res,
-      liked: Boolean(
-        res?.liked ??
-        res?.is_liked ??
-        res?.data?.liked ??
-        res?.data?.is_liked
-      ),
-      likes_count: getSafeNumber(
-        res?.likes_count,
-        res?.like_count,
-        res?.data?.likes_count
-      ),
+      liked: typeof rawLiked === "boolean" ? rawLiked : undefined,
+      likes_count:
+        rawLikesCount === undefined ||
+        rawLikesCount === null ||
+        rawLikesCount === ""
+          ? undefined
+          : Number(rawLikesCount),
     };
   },
 
-  // ✅ FIXED FUNCTION
   toggleBookmark: async (
     postId: string | number,
     creatorId: string | number
@@ -791,9 +1020,9 @@ export const interactApi = {
       raw: res,
       bookmarked: Boolean(
         res?.bookmarked ??
-        res?.is_bookmarked ??
-        res?.data?.bookmarked ??
-        res?.data?.is_bookmarked
+          res?.is_bookmarked ??
+          res?.data?.bookmarked ??
+          res?.data?.is_bookmarked
       ),
     };
   },
@@ -806,12 +1035,17 @@ export const interactApi = {
       })}`
     );
 
+    const comments = normalizeCommentsList(res);
+
     return {
       raw: res,
-      comments: Array.isArray(res?.data) ? res.data : [],
+      comments,
       comments_count: getSafeNumber(
         res?.comments_count,
-        res?.data?.comments_count
+        res?.comment_count,
+        res?.data?.comments_count,
+        res?.data?.comment_count,
+        comments.length
       ),
     };
   },
@@ -832,7 +1066,13 @@ export const interactApi = {
 
     return {
       raw: res,
-      comment: res?.data || res,
+      comment: normalizeComment(res?.data || res),
+      comments_count: getSafeNumber(
+        res?.comments_count,
+        res?.comment_count,
+        res?.data?.comments_count,
+        res?.data?.comment_count
+      ),
     };
   },
 
@@ -847,10 +1087,7 @@ export const interactApi = {
 export const bookmarksApi = {
   getBookmarks: async () => {
     const res = await apiFetch("/user/bookmarks/");
-
-    // your backend returns: { data: [...] }
     const list = Array.isArray(res?.data) ? res.data : [];
-
     return list.map((post: any) => normalizePost(post));
   },
 };
@@ -864,8 +1101,10 @@ export const walletApi = {
 
   getTransactions: async () => {
     const res = await apiFetch("/user/wallet/transactions");
-    return normalizeListOfPayments(res);
+    return normalizeListOfTransactions(res);
   },
+
+  getTransactionsRaw: () => apiFetch("/user/wallet/transactions"),
 
   deposit: async (amount: number) => {
     return apiFetch("/user/wallet/deposit", "POST", { amount });
@@ -880,6 +1119,33 @@ export const paymentsApi = {
   },
 
   getPaymentHistoryRaw: () => apiFetch("/user/payments/"),
+};
+
+// ─── COMBINED FINANCIAL HELPERS ──────────────────────────────────────────────
+export const financeApi = {
+  getAllTransactions: async () => {
+    const [walletTransactions, paymentHistory] = await Promise.all([
+      walletApi.getTransactions().catch(() => []),
+      paymentsApi.getPaymentHistory().catch(() => []),
+    ]);
+
+    const merged = [...walletTransactions, ...paymentHistory];
+
+    const uniqueMap = new Map<string, any>();
+
+    for (const item of merged) {
+      const key = `${item?.id}-${item?.flow}-${item?.amount}-${item?.created_at}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, item);
+      }
+    }
+
+    return Array.from(uniqueMap.values()).sort((a: any, b: any) => {
+      const timeA = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
+  },
 };
 
 // ─── MEDIA URL helper ────────────────────────────────────────────────────────

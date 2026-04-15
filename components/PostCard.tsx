@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -13,6 +13,9 @@ import {
   ChevronUp,
   Send,
   Play,
+  X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { interactApi, mediaUrl, browseApi } from "@/lib/api";
 
@@ -31,9 +34,12 @@ interface Post {
   thumbnail?: string;
   likes_count?: number;
   like_count?: number;
+  total_likes?: number;
   comments_count?: number;
   comment_count?: number;
   is_liked?: boolean;
+  liked?: boolean;
+  has_liked?: boolean;
   is_bookmarked?: boolean;
   is_free?: boolean;
   is_locked?: boolean;
@@ -45,12 +51,26 @@ interface Post {
   [key: string]: any;
 }
 
+type PostCardProps = {
+  post: Post;
+  onLikeChange?: (liked: boolean, count?: number) => void;
+};
+
 function getSafeNumber(...values: any[]): number {
   for (const value of values) {
     const num = Number(value);
     if (!Number.isNaN(num) && Number.isFinite(num)) return num;
   }
   return 0;
+}
+
+function getOptionalNumber(...values: any[]): number | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const num = Number(value);
+    if (!Number.isNaN(num) && Number.isFinite(num)) return num;
+  }
+  return undefined;
 }
 
 function timeAgo(dateStr?: string): string {
@@ -228,13 +248,15 @@ function normalizeCommentUI(comment: any = {}) {
   };
 }
 
-export default function PostCard({ post }: { post: Post }) {
+export default function PostCard({ post, onLikeChange }: PostCardProps) {
   const router = useRouter();
 
-  const [liked, setLiked] = useState(Boolean(post.is_liked));
+  const [liked, setLiked] = useState(
+    Boolean(post.is_liked ?? post.liked ?? post.has_liked ?? false)
+  );
   const [bookmarked, setBookmarked] = useState(Boolean(post.is_bookmarked));
   const [likesCount, setLikesCount] = useState(
-    getSafeNumber(post.likes_count, post.like_count, 0)
+    getSafeNumber(post.likes_count, post.like_count, post.total_likes, 0)
   );
   const [commentsCount, setCommentsCount] = useState(
     getSafeNumber(post.comments_count, post.comment_count, 0)
@@ -249,6 +271,18 @@ export default function PostCard({ post }: { post: Post }) {
   const [bookmarkLoading, setBookmarkLoading] = useState(false);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentsLoading, setCommentsLoading] = useState(false);
+
+  const [showViewer, setShowViewer] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+
+  useEffect(() => {
+    setLiked(Boolean(post.is_liked ?? post.liked ?? post.has_liked ?? false));
+    setBookmarked(Boolean(post.is_bookmarked));
+    setLikesCount(
+      getSafeNumber(post.likes_count, post.like_count, post.total_likes, 0)
+    );
+    setCommentsCount(getSafeNumber(post.comments_count, post.comment_count, 0));
+  }, [post]);
 
   const creator = post.creator || post.user || post.profile || {};
   const creatorId = creator.id || post.creator_id || post.user_id;
@@ -281,6 +315,7 @@ export default function PostCard({ post }: { post: Post }) {
 
   const mediaItems = useMemo(() => getMediaItems(post), [post]);
   const firstMedia = mediaItems[0];
+  const activeMedia = mediaItems[viewerIndex];
 
   const postCaption =
     post.caption ||
@@ -294,35 +329,66 @@ export default function PostCard({ post }: { post: Post }) {
     router.push(`/user/${creatorId}`);
   };
 
+  const openViewer = (index = 0) => {
+    if (!mediaItems.length) return;
+    setViewerIndex(index);
+    setShowViewer(true);
+  };
+
+  const closeViewer = () => {
+    setShowViewer(false);
+  };
+
+  const showPrevMedia = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setViewerIndex((prev) => (prev === 0 ? mediaItems.length - 1 : prev - 1));
+  };
+
+  const showNextMedia = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setViewerIndex((prev) => (prev === mediaItems.length - 1 ? 0 : prev + 1));
+  };
+
   const refreshPostCounts = async () => {
     if (!post?.id || !creatorId) return;
 
     try {
       const fresh: any = await browseApi.getPost(post.id, creatorId);
       const source = fresh?.data || fresh || {};
+      const postSource = source?.post || {};
 
-      setLikesCount(
-        getSafeNumber(
-          source?.likes_count,
-          source?.like_count,
-          source?.post?.likes_count,
-          source?.post?.like_count,
-          0
-        )
+      const freshLikeCount = getSafeNumber(
+        source?.likes_count,
+        source?.like_count,
+        source?.total_likes,
+        postSource?.likes_count,
+        postSource?.like_count,
+        postSource?.total_likes,
+        0
       );
 
-      setCommentsCount(
-        getSafeNumber(
-          source?.comments_count,
-          source?.comment_count,
-          source?.post?.comments_count,
-          source?.post?.comment_count,
-          0
-        )
+      const freshCommentCount = getSafeNumber(
+        source?.comments_count,
+        source?.comment_count,
+        postSource?.comments_count,
+        postSource?.comment_count,
+        0
       );
 
-      if (source?.is_liked !== undefined) {
-        setLiked(Boolean(source.is_liked));
+      const freshLiked =
+        source?.is_liked ??
+        source?.liked ??
+        postSource?.is_liked ??
+        postSource?.liked;
+
+      setLikesCount(freshLikeCount);
+      setCommentsCount(freshCommentCount);
+
+      if (freshLiked !== undefined) {
+        setLiked(Boolean(freshLiked));
+        onLikeChange?.(Boolean(freshLiked), freshLikeCount);
+      } else {
+        onLikeChange?.(liked, freshLikeCount);
       }
     } catch (error) {
       console.error("Failed to refresh post counts", error);
@@ -330,79 +396,89 @@ export default function PostCard({ post }: { post: Post }) {
   };
 
   const handleLike = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    if (likeLoading) return;
-
-    const prevLiked = liked;
-    const prevLikesCount = likesCount;
-
-    const optimisticLiked = !prevLiked;
-    const optimisticCount = optimisticLiked
-      ? prevLikesCount + 1
-      : Math.max(0, prevLikesCount - 1);
-
-    setLiked(optimisticLiked);
-    setLikesCount(optimisticCount);
-    setLikeLoading(true);
-
-    try {
-      const res: any = await interactApi.toggleLike(post.id);
-
-      if (typeof res?.liked === "boolean") {
-        setLiked(res.liked);
-      }
-
-      const returnedLikeCount = getSafeNumber(
-        res?.likes_count,
-        res?.like_count,
-        res?.total_likes,
-        res?.raw?.likes_count,
-        res?.raw?.like_count,
-        res?.raw?.total_likes
-      );
-
-      if (returnedLikeCount || returnedLikeCount === 0) {
-        setLikesCount(returnedLikeCount);
-      } else {
-        await refreshPostCounts();
-      }
-    } catch (error) {
-      console.error("Like failed", error);
-      setLiked(prevLiked);
-      setLikesCount(prevLikesCount);
-    } finally {
-      setLikeLoading(false);
-    }
-  };
-
-  const handleBookmark = async (e: React.MouseEvent<HTMLButtonElement>) => {
   e.stopPropagation();
-  if (bookmarkLoading || !creatorId) return;
+  if (likeLoading) return;
 
-  const prev = bookmarked;
-  setBookmarked(!prev);
-  setBookmarkLoading(true);
+  const prevLiked = liked;
+  const prevLikesCount = likesCount;
+
+  const optimisticLiked = !prevLiked;
+  const optimisticCount = optimisticLiked
+    ? prevLikesCount + 1
+    : Math.max(0, prevLikesCount - 1);
+
+  // instant UI update
+  setLiked(optimisticLiked);
+  setLikesCount(optimisticCount);
+  onLikeChange?.(optimisticLiked, optimisticCount);
+  setLikeLoading(true);
 
   try {
-    const res: any = await interactApi.toggleBookmark(post.id, creatorId);
+    const res: any = await interactApi.toggleLike(post.id);
 
-    const next =
-      res?.is_bookmarked ??
-      res?.bookmarked ??
-      res?.data?.is_bookmarked ??
-      res?.data?.bookmarked;
+    const finalLiked =
+      typeof res?.liked === "boolean" ? res.liked : optimisticLiked;
 
-    if (next !== undefined) {
-      setBookmarked(Boolean(next));
+    const serverCount =
+      typeof res?.likes_count === "number" &&
+      Number.isFinite(res.likes_count)
+        ? res.likes_count
+        : undefined;
+
+    setLiked(finalLiked);
+
+    if (serverCount !== undefined) {
+      setLikesCount(serverCount);
+      onLikeChange?.(finalLiked, serverCount);
+    } else {
+      setLikesCount(optimisticCount);
+      onLikeChange?.(finalLiked, optimisticCount);
+
+      // fallback sync from latest post data if backend did not return count
+      setTimeout(() => {
+        refreshPostCounts();
+      }, 250);
     }
-  } catch (err: any) {
-    console.error("Bookmark failed", err);
-    setBookmarked(prev);
-    alert(err?.message || "Bookmark failed");
+  } catch (error) {
+    console.error("Like failed", error);
+
+    // rollback on error
+    setLiked(prevLiked);
+    setLikesCount(prevLikesCount);
+    onLikeChange?.(prevLiked, prevLikesCount);
   } finally {
-    setBookmarkLoading(false);
+    setLikeLoading(false);
   }
 };
+
+  const handleBookmark = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (bookmarkLoading || !creatorId) return;
+
+    const prev = bookmarked;
+    setBookmarked(!prev);
+    setBookmarkLoading(true);
+
+    try {
+      const res: any = await interactApi.toggleBookmark(post.id, creatorId);
+
+      const next =
+        res?.is_bookmarked ??
+        res?.bookmarked ??
+        res?.data?.is_bookmarked ??
+        res?.data?.bookmarked;
+
+      if (next !== undefined) {
+        setBookmarked(Boolean(next));
+      }
+    } catch (err: any) {
+      console.error("Bookmark failed", err);
+      setBookmarked(prev);
+      alert(err?.message || "Bookmark failed");
+    } finally {
+      setBookmarkLoading(false);
+    }
+  };
 
   const toggleComments = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -472,227 +548,298 @@ export default function PostCard({ post }: { post: Post }) {
   };
 
   return (
-    <div
-      onClick={openCreator}
-      className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 cursor-pointer"
-    >
-      <div className="flex items-center gap-3 p-4">
-        <Link
-          href={creatorId ? `/user/${creatorId}` : "#"}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {creatorAvatar ? (
-            <img
-              src={mediaUrl(creatorAvatar)}
-              alt={creatorDisplayName}
-              className="w-11 h-11 rounded-full object-cover border-2 border-pink-100"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
-              }}
-            />
-          ) : (
-            <div className="w-11 h-11 rounded-full bg-pink-100 flex items-center justify-center text-[#e8125c] font-bold text-sm">
-              {creatorDisplayName.slice(0, 1).toUpperCase()}
-            </div>
-          )}
-        </Link>
-
-        <div className="flex-1">
+    <>
+      <div
+        onClick={openCreator}
+        className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 cursor-pointer"
+      >
+        <div className="flex items-center gap-3 p-4">
           <Link
             href={creatorId ? `/user/${creatorId}` : "#"}
             onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1.5"
           >
-            <span className="font-semibold text-gray-900 text-sm hover:text-[#e8125c] transition-colors">
-              {creatorDisplayName}
-            </span>
-            {creatorVerified && (
-              <BadgeCheck size={15} className="text-[#e8125c]" />
+            {creatorAvatar ? (
+              <img
+                src={mediaUrl(creatorAvatar)}
+                alt={creatorDisplayName}
+                className="w-11 h-11 rounded-full object-cover border-2 border-pink-100"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                }}
+              />
+            ) : (
+              <div className="w-11 h-11 rounded-full bg-pink-100 flex items-center justify-center text-[#e8125c] font-bold text-sm">
+                {creatorDisplayName.slice(0, 1).toUpperCase()}
+              </div>
             )}
           </Link>
 
-          <p className="text-xs text-gray-400">
-            {creatorUsername ? `@${creatorUsername}` : ""}
-            {timeAgo(post.created_at) ? ` · ${timeAgo(post.created_at)}` : ""}
-          </p>
-        </div>
-      </div>
+          <div className="flex-1">
+            <Link
+              href={creatorId ? `/user/${creatorId}` : "#"}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-1.5"
+            >
+              <span className="font-semibold text-gray-900 text-sm hover:text-[#e8125c] transition-colors">
+                {creatorDisplayName}
+              </span>
+              {creatorVerified && (
+                <BadgeCheck size={15} className="text-[#e8125c]" />
+              )}
+            </Link>
 
-      {(post.title || postCaption) && (
-        <div className="px-4 pb-3">
-          {post.title && (
-            <p className="font-semibold text-gray-900 text-sm mb-1">
-              {post.title}
+            <p className="text-xs text-gray-400">
+              {creatorUsername ? `@${creatorUsername}` : ""}
+              {timeAgo(post.created_at) ? ` · ${timeAgo(post.created_at)}` : ""}
             </p>
-          )}
-
-          {postCaption && (
-            <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line break-words">
-              {postCaption}
-            </p>
-          )}
+          </div>
         </div>
-      )}
 
-      {firstMedia && (
-        <div className="relative overflow-hidden">
-          {firstMedia.type === "video" ? (
-            <>
-              <video
+        {(post.title || postCaption) && (
+          <div className="px-4 pb-3">
+            {post.title && (
+              <p className="font-semibold text-gray-900 text-sm mb-1">
+                {post.title}
+              </p>
+            )}
+
+            {postCaption && (
+              <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line break-words">
+                {postCaption}
+              </p>
+            )}
+          </div>
+        )}
+
+        {firstMedia && (
+          <div className="relative overflow-hidden">
+            {firstMedia.type === "video" ? (
+              <>
+                <video
+                  src={mediaUrl(firstMedia.url)}
+                  className={`w-full object-cover max-h-96 ${
+                    isLocked ? "blur-xl brightness-75 scale-105" : ""
+                  }`}
+                  controls={!isLocked}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isLocked) {
+                      openCreator();
+                      return;
+                    }
+                    openViewer(0);
+                  }}
+                />
+                {!isLocked && (
+                  <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1">
+                    <Play size={14} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <img
                 src={mediaUrl(firstMedia.url)}
+                alt="Post media"
                 className={`w-full object-cover max-h-96 ${
                   isLocked ? "blur-xl brightness-75 scale-105" : ""
                 }`}
-                controls={!isLocked}
-                muted
-                playsInline
-                preload="metadata"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isLocked) openCreator();
+                  if (isLocked) {
+                    openCreator();
+                    return;
+                  }
+                  openViewer(0);
+                }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
                 }}
               />
-              {!isLocked && (
-                <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1">
-                  <Play size={14} />
+            )}
+
+            {isLocked && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white">
+                <div className="bg-black/35 backdrop-blur-sm rounded-2xl p-6 text-center border border-white/20">
+                  <Lock size={32} className="mx-auto mb-2" />
+                  <p className="font-semibold text-sm">Paid Post Preview</p>
+                  <p className="text-xs text-white/85 mt-1">
+                    Subscribe to unlock this content
+                  </p>
                 </div>
-              )}
-            </>
-          ) : (
-            <img
-              src={mediaUrl(firstMedia.url)}
-              alt="Post media"
-              className={`w-full object-cover max-h-96 ${
-                isLocked ? "blur-xl brightness-75 scale-105" : ""
-              }`}
-              onClick={(e) => {
-                e.stopPropagation();
-                openCreator();
-              }}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
-              }}
-            />
-          )}
-
-          {isLocked && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white">
-              <div className="bg-black/35 backdrop-blur-sm rounded-2xl p-6 text-center border border-white/20">
-                <Lock size={32} className="mx-auto mb-2" />
-                <p className="font-semibold text-sm">Paid Post Preview</p>
-                <p className="text-xs text-white/85 mt-1">
-                  Subscribe to unlock this content
-                </p>
               </div>
-            </div>
-          )}
+            )}
 
-          {mediaItems.length > 1 && (
-            <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
-              +{mediaItems.length - 1}
-            </div>
-          )}
-        </div>
-      )}
+            {mediaItems.length > 1 && (
+              <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
+                +{mediaItems.length - 1}
+              </div>
+            )}
+          </div>
+        )}
 
-      <div
-        className="flex items-center gap-1 px-4 py-3 border-t border-gray-50"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={handleLike}
-          disabled={likeLoading}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
-            liked
-              ? "text-[#e8125c] bg-pink-50"
-              : "text-gray-500 hover:bg-gray-50"
-          } disabled:opacity-60`}
-        >
-          <Heart size={17} className={liked ? "fill-[#e8125c]" : ""} />
-          <span>{likesCount}</span>
-        </button>
-
-        <button
-          onClick={toggleComments}
-          disabled={commentsLoading}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
-            showComments
-              ? "text-blue-500 bg-blue-50"
-              : "text-gray-500 hover:bg-gray-50"
-          } disabled:opacity-60`}
-        >
-          <MessageCircle size={17} />
-          <span>{commentsCount}</span>
-          {showComments ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-
-        <div className="flex-1" />
-
-        <button
-          onClick={handleBookmark}
-          disabled={bookmarkLoading}
-          className={`p-2 rounded-xl transition-all ${
-            bookmarked
-              ? "text-[#e8125c] bg-pink-50"
-              : "text-gray-400 hover:bg-gray-50"
-          } disabled:opacity-60`}
-        >
-          <Bookmark size={17} className={bookmarked ? "fill-[#e8125c]" : ""} />
-        </button>
-      </div>
-
-      {showComments && (
         <div
-          className="border-t border-gray-50 px-4 py-3"
+          className="flex items-center gap-1 px-4 py-3 border-t border-gray-50"
           onClick={(e) => e.stopPropagation()}
         >
-          {commentsLoading ? (
-            <p className="text-xs text-gray-400 text-center py-2">
-              Loading comments...
-            </p>
-          ) : comments.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-2">
-              No comments yet. Be the first!
-            </p>
-          ) : (
-            <div className="space-y-3 mb-3 max-h-48 overflow-y-auto">
-              {comments.map((c: any, index: number) => (
-                <div key={c.id || index} className="flex gap-2">
-                  <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
-                    {(c.user?.username || "U").slice(0, 1).toUpperCase()}
-                  </div>
+          <button
+            onClick={handleLike}
+            disabled={likeLoading}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
+              liked
+                ? "text-[#e8125c] bg-pink-50"
+                : "text-gray-500 hover:bg-gray-50"
+            } disabled:opacity-60`}
+          >
+            <Heart size={17} className={liked ? "fill-[#e8125c]" : ""} />
+            <span>{likesCount}</span>
+          </button>
 
-                  <div className="bg-gray-50 rounded-xl px-3 py-2 flex-1">
-                    <p className="text-xs font-semibold text-gray-700">
-                      {c.user?.display_name || c.user?.username || "User"}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-0.5">
-                      {c.content}
-                    </p>
+          <button
+            onClick={toggleComments}
+            disabled={commentsLoading}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
+              showComments
+                ? "text-blue-500 bg-blue-50"
+                : "text-gray-500 hover:bg-gray-50"
+            } disabled:opacity-60`}
+          >
+            <MessageCircle size={17} />
+            <span>{commentsCount}</span>
+            {showComments ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          <div className="flex-1" />
+
+          <button
+            onClick={handleBookmark}
+            disabled={bookmarkLoading}
+            className={`p-2 rounded-xl transition-all ${
+              bookmarked
+                ? "text-[#e8125c] bg-pink-50"
+                : "text-gray-400 hover:bg-gray-50"
+            } disabled:opacity-60`}
+          >
+            <Bookmark size={17} className={bookmarked ? "fill-[#e8125c]" : ""} />
+          </button>
+        </div>
+
+        {showComments && (
+          <div
+            className="border-t border-gray-50 px-4 py-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {commentsLoading ? (
+              <p className="text-xs text-gray-400 text-center py-2">
+                Loading comments...
+              </p>
+            ) : comments.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-2">
+                No comments yet. Be the first!
+              </p>
+            ) : (
+              <div className="space-y-3 mb-3 max-h-48 overflow-y-auto">
+                {comments.map((c: any, index: number) => (
+                  <div key={c.id || index} className="flex gap-2">
+                    <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
+                      {(c.user?.username || "U").slice(0, 1).toUpperCase()}
+                    </div>
+
+                    <div className="bg-gray-50 rounded-xl px-3 py-2 flex-1">
+                      <p className="text-xs font-semibold text-gray-700">
+                        {c.user?.display_name || c.user?.username || "User"}
+                      </p>
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        {c.content}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-2">
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitComment()}
+                placeholder="Write a comment..."
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#e8125c] transition-colors"
+              />
+              <button
+                onClick={submitComment}
+                disabled={commentSubmitting}
+                className="p-2 bg-[#e8125c] rounded-xl hover:bg-[#c4104f] transition-colors disabled:opacity-60"
+              >
+                <Send size={14} className="text-white" />
+              </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      {showViewer && activeMedia && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center"
+          onClick={closeViewer}
+        >
+          <button
+            className="absolute top-4 right-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              closeViewer();
+            }}
+          >
+            <X size={22} />
+          </button>
+
+          {mediaItems.length > 1 && (
+            <>
+              <button
+                className="absolute left-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+                onClick={showPrevMedia}
+              >
+                <ChevronLeft size={28} />
+              </button>
+
+              <button
+                className="absolute right-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+                onClick={showNextMedia}
+              >
+                <ChevronRight size={28} />
+              </button>
+            </>
           )}
 
-          <div className="flex gap-2 mt-2">
-            <input
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitComment()}
-              placeholder="Write a comment..."
-              className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#e8125c] transition-colors"
-            />
-            <button
-              onClick={submitComment}
-              disabled={commentSubmitting}
-              className="p-2 bg-[#e8125c] rounded-xl hover:bg-[#c4104f] transition-colors disabled:opacity-60"
-            >
-              <Send size={14} className="text-white" />
-            </button>
+          <div
+            className="w-full h-full flex items-center justify-center px-4 py-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {activeMedia.type === "video" ? (
+              <video
+                src={mediaUrl(activeMedia.url)}
+                controls
+                autoPlay
+                className="max-w-[95vw] max-h-[90vh] rounded-xl"
+              />
+            ) : (
+              <img
+                src={mediaUrl(activeMedia.url)}
+                alt="Full preview"
+                className="max-w-[95vw] max-h-[90vh] object-contain rounded-xl"
+              />
+            )}
           </div>
+
+          {mediaItems.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-sm bg-black/40 px-3 py-1 rounded-full">
+              {viewerIndex + 1} / {mediaItems.length}
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </>
   );
 }

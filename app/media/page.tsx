@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { subscriptionsApi, browseApi, mediaUrl } from "@/lib/api";
-import { Lock, Play, Image as ImageIcon } from "lucide-react";
+import { Lock, Play, Image as ImageIcon, X } from "lucide-react";
 import Spinner from "@/components/Spinner";
 
 function safeArray(value: any) {
@@ -166,6 +166,7 @@ export default function MediaPage() {
   const [media, setMedia] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
+  const [selectedMedia, setSelectedMedia] = useState<any | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -243,91 +244,142 @@ export default function MediaPage() {
   }, [media, filter]);
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Media</h1>
-      <p className="text-gray-500 text-sm mb-6">
-        Photos and videos from your subscriptions
-      </p>
+    <>
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Media</h1>
+        <p className="text-gray-500 text-sm mb-6">
+          Photos and videos from your subscriptions
+        </p>
 
-      <div className="flex gap-2 mb-6">
-        {(["all", "image", "video"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`px-5 py-2 rounded-xl text-sm font-medium capitalize transition-all ${
-              filter === tab
-                ? "bg-[#e8125c] text-white shadow-sm"
-                : "bg-white text-gray-500 border border-gray-200 hover:border-[#e8125c] hover:text-[#e8125c]"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <Spinner text="Loading media..." />
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-20">
-          <ImageIcon size={48} className="mx-auto mb-4 text-gray-200" />
-          <p className="text-gray-400">No media found</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {filtered.map((item) => (
-            <div
-              key={item.id}
-              className="relative aspect-square group cursor-pointer overflow-hidden rounded-xl bg-gray-100 border border-gray-200"
+        <div className="flex gap-2 mb-6">
+          {(["all", "image", "video"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab)}
+              className={`px-5 py-2 rounded-xl text-sm font-medium capitalize transition-all ${
+                filter === tab
+                  ? "bg-[#e8125c] text-white shadow-sm"
+                  : "bg-white text-gray-500 border border-gray-200 hover:border-[#e8125c] hover:text-[#e8125c]"
+              }`}
             >
-              {item.type === "video" ? (
-                <video
-                  src={item.src}
-                  className={`w-full h-full object-cover ${
-                    item.locked ? "blur-md brightness-75" : ""
-                  }`}
-                  muted
-                  playsInline
-                  controls={!item.locked}
-                  preload="metadata"
-                />
-              ) : (
-                <img
-                  src={item.src}
-                  alt="Media"
-                  className={`w-full h-full object-cover transition-transform group-hover:scale-105 ${
-                    item.locked ? "blur-md brightness-75" : ""
-                  }`}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
-                  }}
-                />
-              )}
-
-              {item.locked && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="bg-black/40 rounded-full p-3">
-                    <Lock size={20} className="text-white" />
-                  </div>
-                </div>
-              )}
-
-              {item.type === "video" && !item.locked && (
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  <div className="bg-black/40 rounded-full p-3">
-                    <Play size={20} className="text-white fill-white" />
-                  </div>
-                </div>
-              )}
-
-              <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                <p className="text-white text-xs truncate">
-                  @{item.creator?.username || "creator"}
-                </p>
-              </div>
-            </div>
+              {tab}
+            </button>
           ))}
         </div>
+
+        {loading ? (
+          <Spinner text="Loading media..." />
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-20">
+            <ImageIcon size={48} className="mx-auto mb-4 text-gray-200" />
+            <p className="text-gray-400">No media found</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {filtered.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => {
+                  if (!item.locked) {
+                    setSelectedMedia(item);
+                  }
+                }}
+                className="relative aspect-square group cursor-pointer overflow-hidden rounded-xl bg-gray-100 border border-gray-200"
+              >
+                {item.type === "video" ? (
+                  <video
+                    src={item.src}
+                    className={`w-full h-full object-cover ${
+                      item.locked ? "blur-md brightness-75" : ""
+                    }`}
+                    muted
+                    playsInline
+                    controls={false}
+                    preload="metadata"
+                  />
+                ) : (
+                  <img
+                    src={item.src}
+                    alt="Media"
+                    className={`w-full h-full object-cover transition-transform group-hover:scale-105 ${
+                      item.locked ? "blur-md brightness-75" : ""
+                    }`}
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                    }}
+                  />
+                )}
+
+                {item.locked && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="bg-black/40 rounded-full p-3">
+                      <Lock size={20} className="text-white" />
+                    </div>
+                  </div>
+                )}
+
+                {item.type === "video" && !item.locked && (
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    <div className="bg-black/40 rounded-full p-3">
+                      <Play size={20} className="text-white fill-white" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                  <p className="text-white text-xs truncate">
+                    @{item.creator?.username || "creator"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedMedia && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4"
+          onClick={() => setSelectedMedia(null)}
+        >
+          <div
+            className="relative w-full h-full flex items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedMedia(null)}
+              className="absolute top-4 right-4 z-50 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition"
+            >
+              <X size={24} />
+            </button>
+
+            {selectedMedia.type === "video" ? (
+              <video
+                src={selectedMedia.src}
+                controls
+                autoPlay
+                playsInline
+                className="max-w-full max-h-[90vh] rounded-xl object-contain"
+              />
+            ) : (
+              <img
+                src={selectedMedia.src}
+                alt="Full view"
+                className="max-w-full max-h-[90vh] rounded-xl object-contain"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                }}
+              />
+            )}
+
+            <div className="absolute bottom-4 left-4 right-4 text-center">
+              <p className="text-white text-sm truncate">
+                @{selectedMedia.creator?.username || "creator"}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }

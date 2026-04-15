@@ -56,7 +56,7 @@ export default function MobileHeader() {
   const title =
     pageTitles[pathname] ||
     Object.entries(pageTitles).find(([key]) => pathname.startsWith(key + "/"))?.[1] ||
-    "CreatorHub";
+    "Soulmodel";
 
   // Close drawer on route change
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -92,7 +92,7 @@ export default function MobileHeader() {
         {/* Logo + Page Title */}
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-lg flex items-center justify-center shadow-sm">
-            <span className="text-white font-black text-sm">C</span>
+            <span className="text-white font-black text-sm">S</span>
           </div>
           <span className="font-bold text-gray-900 text-base">{title}</span>
         </div>
@@ -140,9 +140,9 @@ export default function MobileHeader() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-lg flex items-center justify-center">
-              <span className="text-white font-black text-sm">C</span>
+              <span className="text-white font-black text-sm">S</span>
             </div>
-            <span className="font-bold text-gray-900">CreatorHub</span>
+            <span className="font-bold text-gray-900">Soulmodel</span>
           </div>
           <button
             onClick={() => setOpen(false)}
