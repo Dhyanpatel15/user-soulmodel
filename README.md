@@ -27,7 +27,7 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 |------|-----------|
 | Login | `POST /api/v1/auth/login` |
 | Register | `POST /api/v1/auth/register` |
-| Home | `GET /api/v1/user/subscriptions/` |
+<!-- | Home | `GET /api/v1/user/subscriptions/` | -->
 | Feed | `GET /api/v1/user/subscriptions/` + `GET /api/v1/user/browse/creators/{id}/posts` |
 | Media | Same as Feed (extracts media from posts) |
 | Chat | `GET /api/v1/user/conversations`, `POST /api/v1/user/conversations/{id}/messages` |

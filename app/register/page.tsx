@@ -34,7 +34,7 @@ export default function RegisterPage() {
       if (accessToken) {
         setToken(accessToken);
         await refreshUser();
-        router.replace("/home");
+        router.replace("/feed");
       } else {
         router.replace("/login");
       }

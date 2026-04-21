@@ -22,7 +22,7 @@ export default function LoginPage() {
 
     try {
       await login(form.email, form.password);
-      router.replace("/home");
+      router.replace("/feed");
     } catch (err: any) {
       setError(err.message || "Invalid credentials");
     } finally {
@@ -110,6 +110,13 @@ export default function LoginPage() {
             Don&apos;t have an account?{" "}
             <Link href="/register" className="text-[#e8125c] font-semibold hover:underline">
               Sign up
+            </Link>
+          </p>
+
+          <p className="text-center text-sm text-gray-500 mt-6">
+            If Are You Creator?{" "}
+            <Link href="http://localhost:3001/auth" className="text-[#e8125c] font-semibold hover:underline">
+              Login Here
             </Link>
           </p>
         </div>

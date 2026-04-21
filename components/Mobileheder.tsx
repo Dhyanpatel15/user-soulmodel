@@ -8,7 +8,6 @@ import { mediaUrl, notificationsApi } from "@/lib/api";
 import {
   Menu,
   X,
-  Home,
   Rss,
   LayoutGrid,
   MessageCircle,
@@ -21,7 +20,6 @@ import {
 } from "lucide-react";
 
 const pageTitles: Record<string, string> = {
-  "/home": "Home",
   "/feed": "Feed",
   "/media": "Media",
   "/chat": "Messages",
@@ -34,7 +32,6 @@ const pageTitles: Record<string, string> = {
 };
 
 const allNavItems = [
-  { href: "/home", label: "Home", icon: Home },
   { href: "/feed", label: "Feed", icon: Rss },
   { href: "/media", label: "Media", icon: LayoutGrid },
   { href: "/chat", label: "Chat", icon: MessageCircle },

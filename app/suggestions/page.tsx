@@ -10,6 +10,9 @@ import {
   Plus,
   Check,
   Users,
+  X,
+  CheckCircle2,
+  DollarSign,
 } from "lucide-react";
 
 type Creator = {
@@ -30,12 +33,113 @@ type Creator = {
   subscribers_count?: number;
 };
 
+// ─── Toast Notification ───────────────────────────────────────────────────────
+type ToastType = "success" | "info" | "warning";
+
+type Toast = {
+  id: string;
+  message: string;
+  type: ToastType;
+};
+
+function ToastContainer({ toasts, onRemove }: { toasts: Toast[]; onRemove: (id: string) => void }) {
+  return (
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium max-w-xs pointer-events-auto transition-all duration-300 ${
+            toast.type === "success"
+              ? "bg-green-50 border border-green-200 text-green-800"
+              : toast.type === "warning"
+              ? "bg-amber-50 border border-amber-200 text-amber-800"
+              : "bg-blue-50 border border-blue-200 text-blue-800"
+          }`}
+        >
+          {toast.type === "success" ? (
+            <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" />
+          ) : toast.type === "warning" ? (
+            <DollarSign size={16} className="text-amber-500 shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 size={16} className="text-blue-500 shrink-0 mt-0.5" />
+          )}
+          <span className="flex-1">{toast.message}</span>
+          <button
+            onClick={() => onRemove(toast.id)}
+            className="shrink-0 opacity-60 hover:opacity-100"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Subscribe Confirm Modal ──────────────────────────────────────────────────
+function SubscribeModal({
+  creator,
+  onConfirm,
+  onCancel,
+}: {
+  creator: Creator;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const price = Number(creator.subscription_price || 0);
+  const name = creator.display_name || creator.username;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center">
+              <DollarSign size={18} className="text-[#e8125c]" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">Subscribe to {name}</h3>
+              <p className="text-xs text-gray-500">Paid subscription required</p>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 rounded-xl p-4 mb-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">Monthly subscription</span>
+              <span className="text-lg font-bold text-gray-900">
+                ${price.toFixed(2)}<span className="text-sm font-normal text-gray-500">/mo</span>
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              You will be subscribed to <span className="font-medium">@{creator.username}</span> for ${price.toFixed(2)}/month. You can cancel anytime.
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-[#e8125c] text-white text-sm font-semibold hover:bg-[#c91050] transition"
+            >
+              Subscribe — ${price.toFixed(2)}/mo
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function resolveImageUrl(path?: string | null) {
   if (!path) return "";
-
   const clean = String(path).trim();
   if (!clean) return "";
-
   try {
     return mediaUrl(clean, true);
   } catch {
@@ -43,13 +147,7 @@ function resolveImageUrl(path?: string | null) {
   }
 }
 
-function Avatar({
-  creator,
-  size = 52,
-}: {
-  creator: Creator;
-  size?: number;
-}) {
+function Avatar({ creator, size = 52 }: { creator: Creator; size?: number }) {
   const [err, setErr] = useState(false);
 
   useEffect(() => {
@@ -77,7 +175,6 @@ function Avatar({
           {initials}
         </div>
       )}
-
       {creator.is_online && (
         <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-white" />
       )}
@@ -85,6 +182,7 @@ function Avatar({
   );
 }
 
+// ─── Creator Card ─────────────────────────────────────────────────────────────
 function CreatorFeedCard({
   creator,
   subscribed,
@@ -118,21 +216,29 @@ function CreatorFeedCard({
       creator.profile_banner
   );
 
-  const isFree =
-    creator.is_free === true || Number(creator.subscription_price || 0) === 0;
+  const price = Number(creator.subscription_price || 0);
+  const isFree = creator.is_free === true || price === 0;
+
+  // What to show in the info row (below username)
+  const infoText = (() => {
+    if (creator.bio) return null; // bio takes priority, rendered separately
+    if (creator.subscribers_count && creator.subscribers_count > 0) {
+      return `${creator.subscribers_count.toLocaleString()} subscribers`;
+    }
+    if (isFree) return "Free subscription";
+    return `$${price.toFixed(2)}/month`;
+  })();
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+      {/* Cover */}
       <div className="relative h-40 w-full bg-gray-100">
         {coverSrc && !coverErr ? (
           <img
             src={coverSrc}
             alt={creator.display_name || creator.username}
             className="w-full h-full object-cover"
-            onError={() => {
-              console.log("Cover image failed:", coverSrc, creator);
-              setCoverErr(true);
-            }}
+            onError={() => setCoverErr(true)}
           />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-gray-200 via-gray-100 to-gray-300" />
@@ -140,6 +246,7 @@ function CreatorFeedCard({
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent" />
 
+        {/* Three-dot menu */}
         <div className="absolute top-3 right-3">
           <button
             onClick={() => setMenuOpen((prev) => !prev)}
@@ -170,13 +277,13 @@ function CreatorFeedCard({
           )}
         </div>
 
-        {isFree && (
-          <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-gray-700 shadow">
-            Free
-          </span>
-        )}
+        {/* Price / Free badge */}
+        <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-gray-700 shadow">
+          {isFree ? "Free" : `$${price.toFixed(2)}/mo`}
+        </span>
       </div>
 
+      {/* Body */}
       <div className="p-4">
         <div className="flex items-start gap-3">
           <Avatar creator={creator} size={56} />
@@ -194,21 +301,14 @@ function CreatorFeedCard({
             <p className="text-xs text-gray-500 truncate">@{creator.username}</p>
 
             {creator.bio ? (
-              <p className="text-sm text-gray-600 mt-2 line-clamp-2">
-                {creator.bio}
-              </p>
+              <p className="text-sm text-gray-600 mt-2 line-clamp-2">{creator.bio}</p>
             ) : (
-              <p className="text-sm text-gray-500 mt-2">
-                {creator.subscribers_count
-                  ? `${creator.subscribers_count.toLocaleString()} subscribers`
-                  : isFree
-                  ? "Free subscription"
-                  : `$${creator.subscription_price}/month`}
-              </p>
+              <p className="text-sm text-gray-500 mt-2">{infoText}</p>
             )}
           </div>
         </div>
 
+        {/* Actions */}
         <div className="mt-4 flex items-center justify-between gap-3">
           <Link
             href={`/user/${creator.id}`}
@@ -228,12 +328,12 @@ function CreatorFeedCard({
             {subscribed ? (
               <>
                 <Check size={14} />
-                Following
+                {isFree ? "Following" : "Subscribed"}
               </>
             ) : (
               <>
                 <Plus size={14} />
-                {isFree ? "Follow" : "Subscribe"}
+                {isFree ? "Follow" : `Subscribe · $${price.toFixed(2)}/mo`}
               </>
             )}
           </button>
@@ -243,6 +343,7 @@ function CreatorFeedCard({
   );
 }
 
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 function SkeletonCard() {
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-4 animate-pulse">
@@ -264,6 +365,7 @@ function SkeletonCard() {
   );
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function SuggestionsPage() {
   const [allCreators, setAllCreators] = useState<Creator[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
@@ -272,6 +374,24 @@ export default function SuggestionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Toast state
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // Confirm modal state
+  const [pendingCreator, setPendingCreator] = useState<Creator | null>(null);
+
+  const addToast = (message: string, type: ToastType = "success") => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   const load = async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -291,18 +411,9 @@ export default function SuggestionsPage() {
         .map((c: any) => ({
           ...c,
           cover_photo_url:
-            c.cover_photo_url ||
-            c.cover_url ||
-            c.cover ||
-            c.banner ||
-            c.profile_banner ||
-            "",
+            c.cover_photo_url || c.cover_url || c.cover || c.banner || c.profile_banner || "",
           avatar_url:
-            c.avatar_url ||
-            c.profile_photo ||
-            c.profile_image ||
-            c.avatar ||
-            "",
+            c.avatar_url || c.profile_photo || c.profile_image || c.avatar || "",
         }));
 
       setAllCreators(cleanCreators);
@@ -320,7 +431,6 @@ export default function SuggestionsPage() {
       setSubscribedIds(ids);
     } catch (e: any) {
       setError(e?.message || "Failed to load creators");
-      console.error("SuggestionsPage load error:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -335,31 +445,102 @@ export default function SuggestionsPage() {
     return allCreators.filter((c) => !dismissedIds.has(String(c.id)));
   }, [allCreators, dismissedIds]);
 
-  const handleSubscribe = async (id: string | number) => {
+  // Called when user clicks Subscribe/Follow button
+  const handleSubscribeClick = (id: string | number) => {
     const key = String(id);
-    const wasSubbed = subscribedIds.has(key);
+    const creator = allCreators.find((c) => String(c.id) === key);
+    if (!creator) return;
 
+    const isSubscribed = subscribedIds.has(key);
+
+    // If already subscribed → unsubscribe immediately
+    if (isSubscribed) {
+      doUnsubscribe(creator);
+      return;
+    }
+
+    const price = Number(creator.subscription_price || 0);
+    const isFree = creator.is_free === true || price === 0;
+
+    if (isFree) {
+      // Free → subscribe directly
+      doSubscribe(creator);
+    } else {
+      // Paid → show confirm modal
+      setPendingCreator(creator);
+    }
+  };
+
+  const doSubscribe = async (creator: Creator) => {
+    const key = String(creator.id);
+    const price = Number(creator.subscription_price || 0);
+    const isFree = creator.is_free === true || price === 0;
+    const name = creator.display_name || creator.username;
+
+    // Optimistic update
     setSubscribedIds((prev) => {
       const next = new Set(prev);
-      if (wasSubbed) next.delete(key);
-      else next.add(key);
+      next.add(key);
       return next;
     });
 
+    // Show appropriate toast
+    if (isFree) {
+      addToast(`You are now following ${name}!`, "success");
+    } else {
+      addToast(
+        `You have subscribed to ${name} for $${price.toFixed(2)}/month!`,
+        "success"
+      );
+    }
+
     try {
-      if (wasSubbed) {
-        await subscriptionsApi.unsubscribe(id);
-      } else {
-        await subscriptionsApi.subscribe(id);
-      }
-    } catch (e) {
+      await subscriptionsApi.subscribe(creator.id);
+    } catch {
+      // Rollback
       setSubscribedIds((prev) => {
         const next = new Set(prev);
-        if (wasSubbed) next.add(key);
-        else next.delete(key);
+        next.delete(key);
         return next;
       });
+      addToast(`Failed to subscribe to ${name}. Please try again.`, "warning");
     }
+  };
+
+  const doUnsubscribe = async (creator: Creator) => {
+    const key = String(creator.id);
+    const name = creator.display_name || creator.username;
+
+    // Optimistic update
+    setSubscribedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+
+    addToast(`You have unfollowed ${name}.`, "info");
+
+    try {
+      await subscriptionsApi.unsubscribe(creator.id);
+    } catch {
+      // Rollback
+      setSubscribedIds((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      addToast(`Failed to unfollow ${name}. Please try again.`, "warning");
+    }
+  };
+
+  const handleModalConfirm = async () => {
+    if (!pendingCreator) return;
+    setPendingCreator(null);
+    await doSubscribe(pendingCreator);
+  };
+
+  const handleModalCancel = () => {
+    setPendingCreator(null);
   };
 
   const handleDismiss = (id: string | number) => {
@@ -372,7 +553,20 @@ export default function SuggestionsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+
+      {/* Subscribe confirm modal */}
+      {pendingCreator && (
+        <SubscribeModal
+          creator={pendingCreator}
+          onConfirm={handleModalConfirm}
+          onCancel={handleModalCancel}
+        />
+      )}
+
       <div className="max-w-2xl mx-auto px-4 py-6" ref={listRef}>
+        {/* Header */}
         <div className="flex items-center justify-between gap-3 mb-6">
           <div>
             <div className="flex items-center gap-2">
@@ -388,10 +582,7 @@ export default function SuggestionsPage() {
             onClick={() => load(true)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            <RefreshCw
-              size={16}
-              className={refreshing ? "animate-spin" : ""}
-            />
+            <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
             Refresh
           </button>
         </div>
@@ -420,9 +611,7 @@ export default function SuggestionsPage() {
           ) : visibleCreators.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center">
               <div className="text-4xl mb-3">🔍</div>
-              <h2 className="text-lg font-semibold text-gray-800">
-                No creators found
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-800">No creators found</h2>
               <p className="text-sm text-gray-500 mt-1">
                 Try refreshing and check again later.
               </p>
@@ -439,7 +628,7 @@ export default function SuggestionsPage() {
                 key={String(creator.id)}
                 creator={creator}
                 subscribed={subscribedIds.has(String(creator.id))}
-                onSubscribe={handleSubscribe}
+                onSubscribe={handleSubscribeClick}
                 onDismiss={handleDismiss}
               />
             ))

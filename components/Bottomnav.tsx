@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Rss, MessageCircle, Bell, User } from "lucide-react";
+import { Rss, MessageCircle, Bell, User } from "lucide-react";
 
 const bottomNavItems = [
-  { href: "/home", label: "Home", icon: Home },
+  // { href: "/home", label: "Home", icon: Home },
   { href: "/feed", label: "Feed", icon: Rss },
   { href: "/chat", label: "Chat", icon: MessageCircle },
   { href: "/notifications", label: "Alerts", icon: Bell },

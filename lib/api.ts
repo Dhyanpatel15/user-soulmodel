@@ -1148,6 +1148,14 @@ export const financeApi = {
   },
 };
 
+
+
+export const creatorRequestApi = {
+  becomeCreator: () =>
+    apiFetch("/user/become-creator", "POST"),
+};
+
+
 // ─── MEDIA URL helper ────────────────────────────────────────────────────────
 export const mediaUrl = (
   path: string | null | undefined,

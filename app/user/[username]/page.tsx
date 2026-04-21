@@ -706,7 +706,7 @@ export default function UserPage() {
         <div className="text-center">
           <p className="text-5xl font-black text-gray-200 mb-3">404</p>
           <p className="text-gray-500 mb-4">Creator not found</p>
-          <Link href="/home" className="text-[#e8125c] text-sm hover:underline">
+          <Link href="/feed" className="text-[#e8125c] text-sm hover:underline">
             ← Go Home
           </Link>
         </div>
