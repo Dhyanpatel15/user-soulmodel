@@ -186,6 +186,16 @@ const normalizeCreator = (creator: any = {}) => {
       0
   );
 
+  const isSubscribed = Boolean(
+    subscription?.is_subscribed ??
+      subscription?.subscribed ??
+      nestedCreator?.is_subscribed ??
+      nestedCreator?.subscribed ??
+      creator?.is_subscribed ??
+      creator?.subscribed ??
+      false
+  );
+
   return {
     ...creator,
     ...nestedCreator,
@@ -268,15 +278,7 @@ const normalizeCreator = (creator: any = {}) => {
         user?.verified
     ),
 
-    is_subscribed: Boolean(
-      subscription?.is_subscribed ??
-        subscription?.subscribed ??
-        nestedCreator?.is_subscribed ??
-        nestedCreator?.subscribed ??
-        creator?.is_subscribed ??
-        creator?.subscribed ??
-        false
-    ),
+    is_subscribed: isSubscribed,
 
     is_free: Boolean(
       nestedCreator?.is_free === true ||
@@ -318,6 +320,12 @@ const normalizeCreator = (creator: any = {}) => {
         user?.total_subscribers ??
         0
     ),
+
+    subscription: {
+      ...(typeof subscription === "object" ? subscription : {}),
+      subscription_price: subscriptionPrice,
+      is_subscribed: isSubscribed,
+    },
   };
 };
 
@@ -383,22 +391,24 @@ const normalizeCommentsList = (response: any) => {
 export const normalizePost = (post: any = {}) => {
   const creator = normalizeCreator(post?.creator || post?.user || post?.profile || {});
 
-  const is_ppv = Boolean(
-    post?.is_ppv ||
+  const isPremiumPost = Boolean(
+    post?.is_premium ||
+      post?.is_ppv ||
       post?.ppv ||
       post?.is_paid ||
       post?.paid_post ||
-      post?.locked ||
-      post?.is_locked ||
-      post?.visibility === "ppv"
+      post?.visibility === "ppv" ||
+      post?.visibility === "premium"
   );
 
-  const is_locked = Boolean(
-    post?.is_locked ||
-      post?.locked ||
-      post?.can_view === false ||
-      is_ppv ||
-      (!post?.is_free && post?.is_free !== undefined)
+  const isSubscribedToCreator = Boolean(
+    post?.viewer_is_subscribed ??
+      post?.is_subscribed ??
+      post?.subscription_active ??
+      post?.has_subscription ??
+      post?.creator?.is_subscribed ??
+      creator?.is_subscribed ??
+      false
   );
 
   const normalizedCaption =
@@ -429,6 +439,8 @@ export const normalizePost = (post: any = {}) => {
     Array.isArray(post?.comments) ? post.comments.length : undefined
   );
 
+  const is_locked = isPremiumPost && !isSubscribedToCreator;
+
   return {
     ...post,
     creator,
@@ -452,7 +464,10 @@ export const normalizePost = (post: any = {}) => {
         post?.bookmarked ??
         post?.viewer_has_bookmarked
     ),
-    is_ppv,
+    is_premium: isPremiumPost,
+    is_ppv: isPremiumPost,
+    is_subscribed: isSubscribedToCreator,
+    can_view: !is_locked,
     is_locked,
   };
 };
@@ -1148,13 +1163,9 @@ export const financeApi = {
   },
 };
 
-
-
 export const creatorRequestApi = {
-  becomeCreator: () =>
-    apiFetch("/user/become-creator", "POST"),
+  becomeCreator: () => apiFetch("/user/become-creator", "POST"),
 };
-
 
 // ─── MEDIA URL helper ────────────────────────────────────────────────────────
 export const mediaUrl = (

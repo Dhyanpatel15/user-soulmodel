@@ -32,6 +32,7 @@ function pushMediaItem(store: any[], rawUrl: any, rawType?: any, extra: any = {}
     /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(cleanUrl);
 
   const isImage =
+    String(rawType || "").toLowerCase().includes("image") ||
     /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/i.test(cleanUrl) ||
     cleanUrl.includes("/media/") ||
     cleanUrl.includes("/uploads/") ||
@@ -82,6 +83,7 @@ function scanForMedia(value: any, store: any[], extra: any = {}, visited = new W
     "video",
     "video_url",
     "preview_url",
+    "file_url",
   ];
 
   mediaKeys.forEach((key) => {
@@ -127,14 +129,18 @@ function scanForMedia(value: any, store: any[], extra: any = {}, visited = new W
   });
 }
 
-function getPostMedia(post: any) {
-  const mediaItems: any[] = [];
+function getCreatorId(source: any) {
+  return (
+    source?.creator?.id ||
+    source?.creator_id ||
+    source?.id ||
+    source?.user_id ||
+    null
+  );
+}
 
-  const locked =
-    post?.is_locked ||
-    post?.locked ||
-    post?.requires_subscription ||
-    (!post?.is_free && post?.is_free !== undefined);
+function getPostMedia(post: any, subscribedCreatorIds = new Set<string>()) {
+  const mediaItems: any[] = [];
 
   const creator =
     post?.creator ||
@@ -142,10 +148,34 @@ function getPostMedia(post: any) {
     post?.author ||
     {};
 
-  const extra = {
-    locked: Boolean(locked),
+  const creatorId = getCreatorId({
     creator,
+    creator_id: post?.creator_id,
+    user_id: post?.user_id,
+  });
+
+  const creatorKey = creatorId != null ? String(creatorId) : "";
+  const isSubscribedCreator = creatorKey ? subscribedCreatorIds.has(creatorKey) : false;
+
+  const isPremiumPost = Boolean(
+    post?.is_premium ||
+      post?.is_ppv ||
+      post?.ppv ||
+      post?.is_paid ||
+      post?.paid_post ||
+      post?.visibility === "premium" ||
+      post?.visibility === "ppv"
+  );
+
+  const locked = isPremiumPost ? !isSubscribedCreator : false;
+
+  const extra = {
+    locked,
+    creator,
+    creatorId,
     postId: post?.id,
+    isPremiumPost,
+    isSubscribedCreator,
   };
 
   scanForMedia(post, mediaItems, extra);
@@ -175,14 +205,19 @@ export default function MediaPage() {
       try {
         const subs = await subscriptionsApi.getMySubscriptions();
         const subList = normalizeSubscriptions(subs);
+        const subscribedCreatorIds = new Set<string>();
         const allMedia: any[] = [];
+
+        subList.forEach((sub: any) => {
+          const creatorId = getCreatorId(sub);
+          if (creatorId != null) {
+            subscribedCreatorIds.add(String(creatorId));
+          }
+        });
 
         await Promise.all(
           subList.map(async (sub: any, subIndex: number) => {
-            const creatorId =
-              sub?.creator?.id ||
-              sub?.creator_id ||
-              sub?.id;
+            const creatorId = getCreatorId(sub);
 
             if (!creatorId) return;
 
@@ -191,7 +226,7 @@ export default function MediaPage() {
               const posts = normalizePosts(data);
 
               posts.forEach((post: any, postIndex: number) => {
-                const extracted = getPostMedia(post);
+                const extracted = getPostMedia(post, subscribedCreatorIds);
 
                 extracted.forEach((m: any, mediaIndex: number) => {
                   allMedia.push({
@@ -199,9 +234,11 @@ export default function MediaPage() {
                     src: mediaUrl(m.url),
                     originalUrl: m.url,
                     type: m.type,
-                    locked: m.locked,
+                    locked: Boolean(m.locked),
                     creator: m.creator || sub?.creator || {},
+                    creatorId: m.creatorId || creatorId,
                     postId: m.postId || post?.id,
+                    isPremiumPost: Boolean(m.isPremiumPost),
                   });
                 });
               });
@@ -210,7 +247,7 @@ export default function MediaPage() {
               console.log("MediaPage normalized posts:", posts);
               console.log(
                 "MediaPage extracted media:",
-                posts.flatMap((p: any) => getPostMedia(p))
+                posts.flatMap((p: any) => getPostMedia(p, subscribedCreatorIds))
               );
             } catch (error) {
               console.log("MediaPage error loading creator posts:", creatorId, error);

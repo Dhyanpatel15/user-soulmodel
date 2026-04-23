@@ -17,7 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { interactApi, mediaUrl, browseApi } from "@/lib/api";
+import { interactApi, mediaUrl, browseApi, subscriptionsApi } from "@/lib/api";
 
 interface Post {
   id: string | number;
@@ -32,6 +32,14 @@ interface Post {
   media?: any[];
   images?: string[];
   thumbnail?: string;
+  media_files?: any[];
+  primary_media?: {
+    id?: string | number;
+    file_url?: string;
+    file_type?: string;
+    is_primary?: boolean;
+    created_at?: string;
+  };
   likes_count?: number;
   like_count?: number;
   total_likes?: number;
@@ -47,7 +55,11 @@ interface Post {
   ppv?: boolean;
   is_paid?: boolean;
   paid_post?: boolean;
+  is_premium?: boolean;
+  can_view?: boolean;
+  is_subscribed?: boolean;
   created_at?: string;
+  visibility?: string;
   [key: string]: any;
 }
 
@@ -62,15 +74,6 @@ function getSafeNumber(...values: any[]): number {
     if (!Number.isNaN(num) && Number.isFinite(num)) return num;
   }
   return 0;
-}
-
-function getOptionalNumber(...values: any[]): number | undefined {
-  for (const value of values) {
-    if (value === undefined || value === null || value === "") continue;
-    const num = Number(value);
-    if (!Number.isNaN(num) && Number.isFinite(num)) return num;
-  }
-  return undefined;
 }
 
 function timeAgo(dateStr?: string): string {
@@ -94,7 +97,7 @@ function timeAgo(dateStr?: string): string {
 function getMediaItems(post: any) {
   const mediaItems: { url: string; type: "image" | "video" }[] = [];
   const seen = new Set<string>();
-  const visited = new WeakSet();
+  const visited = new WeakSet<object>();
 
   const pushMedia = (rawUrl: any, rawType?: any) => {
     if (!rawUrl || typeof rawUrl !== "string") return;
@@ -109,6 +112,7 @@ function getMediaItems(post: any) {
       /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(cleanUrl);
 
     const isImage =
+      lowerType.includes("image") ||
       /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/i.test(cleanUrl) ||
       cleanUrl.includes("/media/") ||
       cleanUrl.includes("/uploads/") ||
@@ -129,6 +133,16 @@ function getMediaItems(post: any) {
     seen.add(key);
     mediaItems.push(item);
   };
+
+  if (post?.primary_media?.file_url) {
+    pushMedia(post.primary_media.file_url, post.primary_media.file_type);
+  }
+
+  if (Array.isArray(post?.media_files)) {
+    post.media_files.forEach((item: any) => {
+      pushMedia(item?.file_url, item?.file_type);
+    });
+  }
 
   const scan = (value: any) => {
     if (!value) return;
@@ -275,6 +289,11 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
   const [showViewer, setShowViewer] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
+  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
+  const [viewerSubscribed, setViewerSubscribed] = useState(
+    Boolean(post?.is_subscribed || post?.creator?.is_subscribed)
+  );
+
   useEffect(() => {
     setLiked(Boolean(post.is_liked ?? post.liked ?? post.has_liked ?? false));
     setBookmarked(Boolean(post.is_bookmarked));
@@ -305,13 +324,65 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
   const creatorVerified = Boolean(creator.is_verified || creator.verified);
 
-  const isLocked =
-    Boolean(post.is_locked) ||
-    Boolean(post.is_ppv) ||
-    Boolean(post.ppv) ||
-    Boolean(post.is_paid) ||
-    Boolean(post.paid_post) ||
-    (!post.is_free && post.is_free !== undefined);
+  const isPremiumPost = Boolean(
+    post.is_premium ??
+      post.is_ppv ??
+      post.ppv ??
+      post.is_paid ??
+      post.paid_post ??
+      // (post.visibility === "premium") ??
+      (post.visibility === "ppv")
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const checkSubscription = async () => {
+      if (!creatorId) {
+        if (active) setSubscriptionChecked(true);
+        return;
+      }
+
+      try {
+        const res: any = await subscriptionsApi.getMySubscriptions();
+        const list = Array.isArray(res?.data)
+          ? res.data
+          : Array.isArray(res)
+          ? res
+          : [];
+
+        const subscribed = list.some((item: any) => {
+          const subCreatorId =
+            item?.creator_id ??
+            item?.creator?.id ??
+            item?.id;
+
+          return String(subCreatorId) === String(creatorId);
+        });
+
+        if (active) {
+          setViewerSubscribed(subscribed);
+          setSubscriptionChecked(true);
+        }
+      } catch (error) {
+        console.error("Failed to check subscriptions", error);
+        if (active) {
+          setViewerSubscribed(
+            Boolean(post?.is_subscribed || post?.creator?.is_subscribed)
+          );
+          setSubscriptionChecked(true);
+        }
+      }
+    };
+
+    checkSubscription();
+
+    return () => {
+      active = false;
+    };
+  }, [creatorId, post?.is_subscribed, post?.creator?.is_subscribed]);
+
+  const isLocked = isPremiumPost ? !viewerSubscribed : false;
 
   const mediaItems = useMemo(() => getMediaItems(post), [post]);
   const firstMedia = mediaItems[0];
@@ -324,13 +395,43 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
     post.text ||
     "";
 
+  const watermarkText = `@${creatorUsername || creatorDisplayName}`;
+
+  const RepeatedWatermark = () => (
+    <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-10">
+      <div
+        className="absolute inset-[-20%] opacity-20"
+        style={{
+          backgroundImage: `url("data:image/svg+xml;utf8,${encodeURIComponent(`
+            <svg xmlns='http://www.w3.org/2000/svg' width='170' height='110' viewBox='0 0 220 140'>
+              <text
+                x='18'
+                y='72'
+                fill='white'
+                fill-opacity='0.9'
+                font-size='18'
+                font-family='Arial, sans-serif'
+                font-weight='700'
+                transform='rotate(-30 110 70)'
+              >
+                ${watermarkText}
+              </text>
+            </svg>
+          `)}")`,
+          backgroundRepeat: "repeat",
+          backgroundSize: "170px 110px",
+        }}
+      />
+    </div>
+  );
+
   const openCreator = () => {
     if (!creatorId) return;
     router.push(`/user/${creatorId}`);
   };
 
   const openViewer = (index = 0) => {
-    if (!mediaItems.length) return;
+    if (!mediaItems.length || isLocked) return;
     setViewerIndex(index);
     setShowViewer(true);
   };
@@ -396,60 +497,57 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
   };
 
   const handleLike = async (e: React.MouseEvent<HTMLButtonElement>) => {
-  e.stopPropagation();
-  if (likeLoading) return;
+    e.stopPropagation();
+    if (likeLoading) return;
 
-  const prevLiked = liked;
-  const prevLikesCount = likesCount;
+    const prevLiked = liked;
+    const prevLikesCount = likesCount;
 
-  const optimisticLiked = !prevLiked;
-  const optimisticCount = optimisticLiked
-    ? prevLikesCount + 1
-    : Math.max(0, prevLikesCount - 1);
+    const optimisticLiked = !prevLiked;
+    const optimisticCount = optimisticLiked
+      ? prevLikesCount + 1
+      : Math.max(0, prevLikesCount - 1);
 
-  // instant UI update
-  setLiked(optimisticLiked);
-  setLikesCount(optimisticCount);
-  onLikeChange?.(optimisticLiked, optimisticCount);
-  setLikeLoading(true);
+    setLiked(optimisticLiked);
+    setLikesCount(optimisticCount);
+    onLikeChange?.(optimisticLiked, optimisticCount);
+    setLikeLoading(true);
 
-  try {
-    const res: any = await interactApi.toggleLike(post.id);
+    try {
+      const res: any = await interactApi.toggleLike(post.id);
 
-    const finalLiked =
-      typeof res?.liked === "boolean" ? res.liked : optimisticLiked;
+      const finalLiked =
+        typeof res?.liked === "boolean" ? res.liked : optimisticLiked;
 
-    const serverCount =
-      typeof res?.likes_count === "number" &&
-      Number.isFinite(res.likes_count)
-        ? res.likes_count
-        : undefined;
+      const serverCount =
+        typeof res?.likes_count === "number" &&
+        Number.isFinite(res.likes_count)
+          ? res.likes_count
+          : undefined;
 
-    setLiked(finalLiked);
+      setLiked(finalLiked);
 
-    if (serverCount !== undefined) {
-      setLikesCount(serverCount);
-      onLikeChange?.(finalLiked, serverCount);
-    } else {
-      setLikesCount(optimisticCount);
-      onLikeChange?.(finalLiked, optimisticCount);
+      if (serverCount !== undefined) {
+        setLikesCount(serverCount);
+        onLikeChange?.(finalLiked, serverCount);
+      } else {
+        setLikesCount(optimisticCount);
+        onLikeChange?.(finalLiked, optimisticCount);
 
-      // fallback sync from latest post data if backend did not return count
-      setTimeout(() => {
-        refreshPostCounts();
-      }, 250);
+        setTimeout(() => {
+          refreshPostCounts();
+        }, 250);
+      }
+    } catch (error) {
+      console.error("Like failed", error);
+
+      setLiked(prevLiked);
+      setLikesCount(prevLikesCount);
+      onLikeChange?.(prevLiked, prevLikesCount);
+    } finally {
+      setLikeLoading(false);
     }
-  } catch (error) {
-    console.error("Like failed", error);
-
-    // rollback on error
-    setLiked(prevLiked);
-    setLikesCount(prevLikesCount);
-    onLikeChange?.(prevLiked, prevLikesCount);
-  } finally {
-    setLikeLoading(false);
-  }
-};
+  };
 
   const handleBookmark = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -633,34 +731,42 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                     openViewer(0);
                   }}
                 />
+
                 {!isLocked && (
-                  <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1">
-                    <Play size={14} />
-                  </div>
+                  <>
+                    <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 z-20">
+                      <Play size={14} />
+                    </div>
+                    <RepeatedWatermark />
+                  </>
                 )}
               </>
             ) : (
-              <img
-                src={mediaUrl(firstMedia.url)}
-                alt="Post media"
-                className={`w-full object-cover max-h-96 ${
-                  isLocked ? "blur-xl brightness-75 scale-105" : ""
-                }`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isLocked) {
-                    openCreator();
-                    return;
-                  }
-                  openViewer(0);
-                }}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
-                }}
-              />
+              <>
+                <img
+                  src={mediaUrl(firstMedia.url)}
+                  alt="Post media"
+                  className={`w-full object-cover max-h-96 ${
+                    isLocked ? "blur-xl brightness-75 scale-105" : ""
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isLocked) {
+                      openCreator();
+                      return;
+                    }
+                    openViewer(0);
+                  }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                  }}
+                />
+
+                {!isLocked && <RepeatedWatermark />}
+              </>
             )}
 
-            {isLocked && (
+            {isLocked && isPremiumPost && subscriptionChecked && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white">
                 <div className="bg-black/35 backdrop-blur-sm rounded-2xl p-6 text-center border border-white/20">
                   <Lock size={32} className="mx-auto mb-2" />
@@ -673,120 +779,21 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
             )}
 
             {mediaItems.length > 1 && (
-              <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
+              <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full z-20">
                 +{mediaItems.length - 1}
               </div>
             )}
           </div>
         )}
-
-        <div
-          className="flex items-center gap-1 px-4 py-3 border-t border-gray-50"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={handleLike}
-            disabled={likeLoading}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
-              liked
-                ? "text-[#e8125c] bg-pink-50"
-                : "text-gray-500 hover:bg-gray-50"
-            } disabled:opacity-60`}
-          >
-            <Heart size={17} className={liked ? "fill-[#e8125c]" : ""} />
-            <span>{likesCount}</span>
-          </button>
-
-          <button
-            onClick={toggleComments}
-            disabled={commentsLoading}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all ${
-              showComments
-                ? "text-blue-500 bg-blue-50"
-                : "text-gray-500 hover:bg-gray-50"
-            } disabled:opacity-60`}
-          >
-            <MessageCircle size={17} />
-            <span>{commentsCount}</span>
-            {showComments ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-
-          <div className="flex-1" />
-
-          <button
-            onClick={handleBookmark}
-            disabled={bookmarkLoading}
-            className={`p-2 rounded-xl transition-all ${
-              bookmarked
-                ? "text-[#e8125c] bg-pink-50"
-                : "text-gray-400 hover:bg-gray-50"
-            } disabled:opacity-60`}
-          >
-            <Bookmark size={17} className={bookmarked ? "fill-[#e8125c]" : ""} />
-          </button>
-        </div>
-
-        {showComments && (
-          <div
-            className="border-t border-gray-50 px-4 py-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {commentsLoading ? (
-              <p className="text-xs text-gray-400 text-center py-2">
-                Loading comments...
-              </p>
-            ) : comments.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-2">
-                No comments yet. Be the first!
-              </p>
-            ) : (
-              <div className="space-y-3 mb-3 max-h-48 overflow-y-auto">
-                {comments.map((c: any, index: number) => (
-                  <div key={c.id || index} className="flex gap-2">
-                    <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
-                      {(c.user?.username || "U").slice(0, 1).toUpperCase()}
-                    </div>
-
-                    <div className="bg-gray-50 rounded-xl px-3 py-2 flex-1">
-                      <p className="text-xs font-semibold text-gray-700">
-                        {c.user?.display_name || c.user?.username || "User"}
-                      </p>
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        {c.content}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex gap-2 mt-2">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submitComment()}
-                placeholder="Write a comment..."
-                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#e8125c] transition-colors"
-              />
-              <button
-                onClick={submitComment}
-                disabled={commentSubmitting}
-                className="p-2 bg-[#e8125c] rounded-xl hover:bg-[#c4104f] transition-colors disabled:opacity-60"
-              >
-                <Send size={14} className="text-white" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {showViewer && activeMedia && (
+      {showViewer && activeMedia && !isLocked && (
         <div
           className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center"
           onClick={closeViewer}
         >
           <button
-            className="absolute top-4 right-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+            className="absolute top-4 right-4 z-20 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               closeViewer();
@@ -798,14 +805,14 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
           {mediaItems.length > 1 && (
             <>
               <button
-                className="absolute left-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+                className="absolute left-4 z-20 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
                 onClick={showPrevMedia}
               >
                 <ChevronLeft size={28} />
               </button>
 
               <button
-                className="absolute right-4 z-10 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+                className="absolute right-4 z-20 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
                 onClick={showNextMedia}
               >
                 <ChevronRight size={28} />
@@ -814,7 +821,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
           )}
 
           <div
-            className="w-full h-full flex items-center justify-center px-4 py-10"
+            className="relative w-full h-full flex items-center justify-center px-4 py-10"
             onClick={(e) => e.stopPropagation()}
           >
             {activeMedia.type === "video" ? (
@@ -831,13 +838,9 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                 className="max-w-[95vw] max-h-[90vh] object-contain rounded-xl"
               />
             )}
-          </div>
 
-          {mediaItems.length > 1 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-sm bg-black/40 px-3 py-1 rounded-full">
-              {viewerIndex + 1} / {mediaItems.length}
-            </div>
-          )}
+            <RepeatedWatermark />
+          </div>
         </div>
       )}
     </>
