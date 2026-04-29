@@ -8,6 +8,9 @@ import {
   subscriptionsApi,
   messagesApi,
   mediaUrl,
+  userProfileApi,
+  getToken,
+  clearLoggedInUserCache,
 } from "@/lib/api";
 import PostCard from "@/components/PostCard";
 import Spinner from "@/components/Spinner";
@@ -38,6 +41,93 @@ function firstDefined(...values: any[]) {
     }
   }
   return null;
+}
+
+function toBoolean(value: any) {
+  if (value === true) return true;
+  if (value === false) return false;
+
+  if (typeof value === "string") {
+    const clean = value.trim().toLowerCase();
+
+    if (
+      clean === "true" ||
+      clean === "yes" ||
+      clean === "1" ||
+      clean === "active" ||
+      clean === "subscribed"
+    ) {
+      return true;
+    }
+
+    if (
+      clean === "false" ||
+      clean === "no" ||
+      clean === "0" ||
+      clean === "inactive" ||
+      clean === "unsubscribed"
+    ) {
+      return false;
+    }
+  }
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  return false;
+}
+
+function getStringValue(value: any): string {
+  if (value === null || value === undefined) return "";
+
+  const str = String(value).trim();
+
+  if (!str) return "";
+  if (str.toLowerCase() === "null") return "";
+  if (str.toLowerCase() === "undefined") return "";
+  if (str.toLowerCase() === "user") return "";
+
+  return str;
+}
+
+function extractLoggedInUsername(data: any): string {
+  if (!data) return "";
+
+  const possibleUsers = [
+    data,
+    data?.data,
+    data?.user,
+    data?.profile,
+    data?.current_user,
+    data?.currentUser,
+    data?.logged_in_user,
+    data?.loggedInUser,
+    data?.auth_user,
+    data?.authUser,
+    data?.data?.user,
+    data?.data?.profile,
+    data?.data?.current_user,
+    data?.data?.currentUser,
+    data?.data?.logged_in_user,
+    data?.data?.loggedInUser,
+    data?.data?.auth_user,
+    data?.data?.authUser,
+  ];
+
+  for (const user of possibleUsers) {
+    const username =
+      getStringValue(user?.username) ||
+      getStringValue(user?.user_name) ||
+      getStringValue(user?.handle) ||
+      getStringValue(user?.display_name) ||
+      getStringValue(user?.full_name) ||
+      getStringValue(user?.name);
+
+    if (username) return username;
+  }
+
+  return "";
 }
 
 function extractAssetUrl(value: any): string | null {
@@ -88,11 +178,7 @@ function extractAssetUrl(value: any): string | null {
 function normalizeCreator(raw: any) {
   const dataLayer = raw?.data || {};
   const creatorLayer =
-    dataLayer?.creator ||
-    raw?.creator ||
-    dataLayer ||
-    raw ||
-    {};
+    dataLayer?.creator || raw?.creator || dataLayer || raw || {};
 
   const subscriptionLayer =
     dataLayer?.subscription ||
@@ -100,11 +186,7 @@ function normalizeCreator(raw: any) {
     creatorLayer?.subscription ||
     {};
 
-  const nestedUser =
-    creatorLayer?.user ||
-    raw?.user ||
-    dataLayer?.user ||
-    {};
+  const nestedUser = creatorLayer?.user || raw?.user || dataLayer?.user || {};
 
   const id = firstDefined(
     creatorLayer?.id,
@@ -240,18 +322,48 @@ function normalizeCreator(raw: any) {
     )
   );
 
-  const isSubscribed = Boolean(
+  const subscriptionStatus = String(
     firstDefined(
-      subscriptionLayer?.is_subscribed,
-      subscriptionLayer?.subscribed,
-      creatorLayer?.is_subscribed,
-      creatorLayer?.subscribed,
-      raw?.is_subscribed,
-      raw?.subscribed,
-      nestedUser?.is_subscribed,
-      nestedUser?.subscribed,
-      false
+      subscriptionLayer?.status,
+      subscriptionLayer?.subscription_status,
+      subscriptionLayer?.payment_status,
+      creatorLayer?.subscription_status,
+      raw?.subscription_status,
+      ""
     )
+  ).toLowerCase();
+
+  const subscriptionFlag = firstDefined(
+    subscriptionLayer?.is_subscribed,
+    subscriptionLayer?.subscribed,
+    subscriptionLayer?.active,
+    subscriptionLayer?.is_active,
+
+    creatorLayer?.is_subscribed,
+    creatorLayer?.subscribed,
+    creatorLayer?.active_subscription,
+    creatorLayer?.has_active_subscription,
+
+    raw?.is_subscribed,
+    raw?.subscribed,
+    raw?.active_subscription,
+    raw?.has_active_subscription,
+
+    nestedUser?.is_subscribed,
+    nestedUser?.subscribed,
+
+    false
+  );
+
+  const isSubscribed = Boolean(
+    toBoolean(subscriptionFlag) ||
+      subscriptionStatus === "active" ||
+      subscriptionStatus === "paid" ||
+      subscriptionStatus === "success" ||
+      subscriptionStatus === "trialing" ||
+      Boolean(subscriptionLayer?.subscription_id) ||
+      Boolean(subscriptionLayer?.user_subscription_id) ||
+      Boolean(subscriptionLayer?.creator_subscription_id)
   );
 
   const subscriptionPrice = Number(
@@ -541,6 +653,151 @@ export default function UserPage() {
   const [avatarBroken, setAvatarBroken] = useState(false);
   const [bannerBroken, setBannerBroken] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<any>(null);
+  const [loggedInUsername, setLoggedInUsername] = useState<string>("");
+
+  const blockMediaDownload = (e: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const getWatermarkText = () => {
+    const cleanWatermarkName = loggedInUsername || "User";
+
+    return cleanWatermarkName.startsWith("@")
+      ? cleanWatermarkName
+      : `@${cleanWatermarkName}`;
+  };
+
+  const RepeatedWatermark = ({ text }: { text: string }) => (
+    <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-10">
+      <div
+        className="absolute inset-[-20%] opacity-20"
+        style={{
+          backgroundImage: `url("data:image/svg+xml;utf8,${encodeURIComponent(`
+            <svg xmlns='http://www.w3.org/2000/svg' width='170' height='110' viewBox='0 0 220 140'>
+              <text
+                x='18'
+                y='72'
+                fill='white'
+                fill-opacity='0.9'
+                font-size='18'
+                font-family='Arial, sans-serif'
+                font-weight='700'
+                transform='rotate(-30 110 70)'
+              >
+                ${text}
+              </text>
+            </svg>
+          `)}")`,
+          backgroundRepeat: "repeat",
+          backgroundSize: "170px 110px",
+        }}
+      />
+    </div>
+  );
+
+  useEffect(() => {
+    const blockKeys = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+
+      if (
+        (e.ctrlKey && key === "s") ||
+        (e.ctrlKey && key === "u") ||
+        (e.ctrlKey && e.shiftKey && key === "i") ||
+        (e.ctrlKey && e.shiftKey && key === "j") ||
+        key === "f12"
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    document.addEventListener("keydown", blockKeys);
+
+    return () => {
+      document.removeEventListener("keydown", blockKeys);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadLoggedInUsername = async () => {
+      try {
+        const currentToken = getToken();
+
+        if (!currentToken) {
+          if (active) {
+            setLoggedInUsername("");
+          }
+
+          clearLoggedInUserCache();
+          return;
+        }
+
+        const cachedUsername = localStorage.getItem("loggedInUsername");
+        const cachedToken = localStorage.getItem("loggedInUsernameToken");
+
+        if (cachedUsername && cachedToken === currentToken) {
+          if (active) {
+            setLoggedInUsername(cachedUsername);
+          }
+
+          return;
+        }
+
+        localStorage.removeItem("loggedInUsername");
+        localStorage.removeItem("loggedInUsernameToken");
+
+        const profile = await userProfileApi.getMe();
+
+        console.log("Current logged-in profile for photo watermark:", profile);
+
+        const username = extractLoggedInUsername(profile);
+
+        if (username && active) {
+          setLoggedInUsername(username);
+
+          localStorage.setItem("loggedInUsername", username);
+          localStorage.setItem("loggedInUsernameToken", currentToken);
+
+          return;
+        }
+
+        if (active) {
+          setLoggedInUsername("");
+        }
+
+        console.error(
+          "Username not found in current profile response. Backend must send username."
+        );
+      } catch (error) {
+        console.error("Failed to load current logged-in username:", error);
+
+        if (active) {
+          setLoggedInUsername("");
+        }
+
+        localStorage.removeItem("loggedInUsername");
+        localStorage.removeItem("loggedInUsernameToken");
+      }
+    };
+
+    loadLoggedInUsername();
+
+    const refreshUsername = () => {
+      loadLoggedInUsername();
+    };
+
+    window.addEventListener("storage", refreshUsername);
+    window.addEventListener("focus", refreshUsername);
+
+    return () => {
+      active = false;
+      window.removeEventListener("storage", refreshUsername);
+      window.removeEventListener("focus", refreshUsername);
+    };
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -572,12 +829,13 @@ export default function UserPage() {
         }
 
         setCreator(normalizedCreator);
-        setSubscribed(normalizedCreator?.is_subscribed || false);
+        setSubscribed(Boolean(normalizedCreator?.is_subscribed));
 
         const postLookupId =
           normalizedCreator?.id || normalizedCreator?.username || routeValue;
 
         let postsData: any = [];
+
         try {
           postsData = await browseApi.getCreatorPosts(postLookupId);
         } catch {
@@ -589,11 +847,11 @@ export default function UserPage() {
 
         console.log("Creator profile response:", profile);
         console.log("Normalized creator:", normalizedCreator);
-        console.log("Creator raw object:", normalizedCreator.creator_raw);
-        console.log("Subscription raw object:", normalizedCreator.subscription_raw);
-        console.log("Resolved subscription price:", normalizedCreator.subscription_price);
-        console.log("Creator banner value:", normalizedCreator.banner);
-        console.log("Creator avatar value:", normalizedCreator.avatar);
+        console.log("Is subscribed:", normalizedCreator.is_subscribed);
+        console.log(
+          "Subscription raw object:",
+          normalizedCreator.subscription_raw
+        );
       } catch (e: any) {
         if (
           e?.message?.includes("404") ||
@@ -619,6 +877,7 @@ export default function UserPage() {
     };
 
     window.addEventListener("keydown", onKeyDown);
+
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
@@ -626,6 +885,7 @@ export default function UserPage() {
     if (!creator?.id && !creator?.username) return;
 
     setSubLoading(true);
+
     try {
       const targetId = creator?.id || creator?.username;
 
@@ -706,6 +966,7 @@ export default function UserPage() {
         <div className="text-center">
           <p className="text-5xl font-black text-gray-200 mb-3">404</p>
           <p className="text-gray-500 mb-4">Creator not found</p>
+
           <Link href="/feed" className="text-[#e8125c] text-sm hover:underline">
             ← Go Home
           </Link>
@@ -735,10 +996,19 @@ export default function UserPage() {
             <img
               src={bannerSrc}
               alt="Cover"
-              className="absolute inset-0 w-full h-full object-cover"
+              draggable={false}
+              onContextMenu={blockMediaDownload}
+              onDragStart={blockMediaDownload}
+              className="absolute inset-0 w-full h-full object-cover select-none"
+              style={{
+                WebkitUserSelect: "none",
+                userSelect: "none",
+                WebkitTouchCallout: "none",
+              }}
               onError={() => setBannerBroken(true)}
             />
           )}
+
           <div className="absolute inset-0 bg-black/15" />
         </div>
 
@@ -748,7 +1018,15 @@ export default function UserPage() {
               <img
                 src={avatarSrc}
                 alt={displayName}
-                className="w-24 h-24 rounded-full object-cover object-center border-4 border-white shadow-md bg-white"
+                draggable={false}
+                onContextMenu={blockMediaDownload}
+                onDragStart={blockMediaDownload}
+                className="w-24 h-24 rounded-full object-cover object-center border-4 border-white shadow-md bg-white select-none"
+                style={{
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                }}
                 onError={() => setAvatarBroken(true)}
               />
             ) : (
@@ -767,10 +1045,12 @@ export default function UserPage() {
           <div className="mb-3">
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-gray-900">{displayName}</h1>
+
               {creator?.is_verified && (
                 <BadgeCheck size={20} className="text-[#e8125c]" />
               )}
             </div>
+
             <p className="text-sm text-gray-400">@{username}</p>
           </div>
 
@@ -778,11 +1058,15 @@ export default function UserPage() {
             <span>
               <strong className="text-gray-900">{subCount}</strong> Subscribers
             </span>
+
             <span className="text-gray-200">|</span>
+
             <span>
               <strong className="text-gray-900">{postsCount}</strong> Posts
             </span>
+
             <span className="text-gray-200">|</span>
+
             <span>
               <strong className="text-gray-900">{mediaCount}</strong> Media
             </span>
@@ -812,45 +1096,55 @@ export default function UserPage() {
             </Link>
           </div>
 
-          {!subscribed ? (
+          {subscribed ? (
+            <div className="mb-5">
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+                <button
+                  onClick={handleSubscribe}
+                  disabled={subLoading}
+                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60 transition-colors"
+                >
+                  {subLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <BadgeCheck size={18} />
+                  )}
+
+                  {subLoading
+                    ? "Updating..."
+                    : price > 0
+                    ? `Subscribed · $${Number(price).toFixed(2)}/mo`
+                    : "Subscribed Free"}
+                </button>
+
+                <p className="text-xs text-green-700 text-center mt-3 font-medium">
+                  You are already subscribed to this creator.
+                </p>
+              </div>
+            </div>
+          ) : (
             <div className="mb-5">
               <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4 mb-3">
                 <h3 className="font-bold text-gray-900 mb-1">
                   🔓 Unlock Premium Content
                 </h3>
+
                 <p className="text-xs text-gray-500 mb-3">
                   Subscribe to get access to exclusive posts, photos, and more.
                 </p>
+
                 <button
                   onClick={handleSubscribe}
                   disabled={subLoading}
                   className="w-full py-3 bg-[#e8125c] hover:bg-[#c4104f] text-white font-semibold rounded-xl transition-colors text-sm shadow-sm shadow-pink-200 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {subLoading && (
-                    <Loader2 size={16} className="animate-spin" />
-                  )}
+                  {subLoading && <Loader2 size={16} className="animate-spin" />}
+
                   {price > 0
                     ? `Subscribe For $${Number(price).toFixed(2)}/Month`
                     : "Subscribe Free"}
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="mb-5">
-              <button
-                onClick={handleSubscribe}
-                disabled={subLoading}
-                className="w-full py-3 bg-green-50 border border-green-200 text-green-700 font-semibold rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {subLoading ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <BadgeCheck size={18} />
-                )}
-                {subLoading
-                  ? "Updating..."
-                  : `Subscribed${price > 0 ? ` · $${Number(price).toFixed(2)}/mo` : ""}`}
-              </button>
             </div>
           )}
 
@@ -868,6 +1162,7 @@ export default function UserPage() {
                 {tab === "posts" && <FileText size={15} />}
                 {tab === "media" && <ImageIcon size={15} />}
                 {tab === "about" && <Grid3X3 size={15} />}
+
                 {tab === "media" ? "Photos" : tab}
               </button>
             ))}
@@ -893,17 +1188,36 @@ export default function UserPage() {
             ))}
 
           {activeTab === "media" && (
-            <div>
+            <div
+              className="select-none"
+              onContextMenu={(e) => e.preventDefault()}
+              style={{
+                WebkitUserSelect: "none",
+                userSelect: "none",
+                WebkitTouchCallout: "none",
+              }}
+            >
               {allMedia.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {allMedia.map((item: any) => {
                     const relatedPost = posts.find(
                       (p: any) => String(p.id) === String(item.postId)
                     );
+
                     const isLocked = isPPVPost(relatedPost);
+                    const mediaWatermarkText = getWatermarkText();
 
                     return (
-                      <div key={item.id} className="rounded-xl overflow-hidden">
+                      <div
+                        key={item.id}
+                        className="rounded-xl overflow-hidden select-none"
+                        onContextMenu={(e) => e.preventDefault()}
+                        style={{
+                          WebkitUserSelect: "none",
+                          userSelect: "none",
+                          WebkitTouchCallout: "none",
+                        }}
+                      >
                         <div className="aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200 relative">
                           {item.type === "video" ? (
                             <>
@@ -914,6 +1228,7 @@ export default function UserPage() {
                                 onClick={() =>
                                   !isLocked && setSelectedMedia(item)
                                 }
+                                onContextMenu={(e) => e.preventDefault()}
                               >
                                 <video
                                   src={item.src}
@@ -925,36 +1240,64 @@ export default function UserPage() {
                                   muted
                                   playsInline
                                   preload="metadata"
+                                  controls={false}
+                                  controlsList="nodownload noplaybackrate"
+                                  disablePictureInPicture
+                                  onContextMenu={blockMediaDownload}
+                                  onDragStart={blockMediaDownload}
                                 />
+
+                                {!isLocked && (
+                                  <RepeatedWatermark
+                                    text={mediaWatermarkText}
+                                  />
+                                )}
                               </div>
 
                               {!isLocked && (
-                                <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 pointer-events-none">
+                                <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 pointer-events-none z-20">
                                   <Play size={14} />
                                 </div>
                               )}
                             </>
                           ) : (
-                            <img
-                              src={item.src}
-                              alt="Creator media"
-                              onClick={() =>
-                                !isLocked && setSelectedMedia(item)
-                              }
-                              className={`w-full h-full object-cover ${
-                                isLocked
-                                  ? "blur-xl brightness-75 scale-105"
-                                  : "cursor-pointer"
-                              }`}
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src =
-                                  "/placeholder.jpg";
-                              }}
-                            />
+                            <>
+                              <img
+                                src={item.src}
+                                alt="Creator media"
+                                draggable={false}
+                                onContextMenu={blockMediaDownload}
+                                onDragStart={blockMediaDownload}
+                                onMouseDown={(e) => {
+                                  if (e.button === 2) blockMediaDownload(e);
+                                }}
+                                onClick={() =>
+                                  !isLocked && setSelectedMedia(item)
+                                }
+                                className={`w-full h-full object-cover select-none ${
+                                  isLocked
+                                    ? "blur-xl brightness-75 scale-105"
+                                    : "cursor-pointer"
+                                }`}
+                                style={{
+                                  WebkitUserSelect: "none",
+                                  userSelect: "none",
+                                  WebkitTouchCallout: "none",
+                                }}
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src =
+                                    "/placeholder.jpg";
+                                }}
+                              />
+
+                              {!isLocked && (
+                                <RepeatedWatermark text={mediaWatermarkText} />
+                              )}
+                            </>
                           )}
 
                           {isLocked && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-20">
                               <div className="bg-white/90 px-3 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5">
                                 <Lock size={12} />
                                 Paid Preview
@@ -977,6 +1320,7 @@ export default function UserPage() {
           {activeTab === "about" && (
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-900 mb-3">About creator</h3>
+
               <p className="text-sm text-gray-600 leading-relaxed mb-6">
                 {creator?.bio || "No bio provided."}
               </p>
@@ -988,13 +1332,17 @@ export default function UserPage() {
                     label: "Username",
                     value: creator?.username ? `@${creator.username}` : "-",
                   },
-                  { label: "Display Name", value: creator?.display_name || "-" },
+                  {
+                    label: "Display Name",
+                    value: creator?.display_name || "-",
+                  },
                   { label: "Subscribers", value: subCount },
                   { label: "Total Posts", value: postsCount },
                   { label: "Total Media", value: mediaCount },
                   {
                     label: "Subscription Price",
-                    value: price > 0 ? `$${Number(price).toFixed(2)}/month` : "Free",
+                    value:
+                      price > 0 ? `$${Number(price).toFixed(2)}/month` : "Free",
                   },
                   creator?.location
                     ? { label: "Location", value: creator.location }
@@ -1010,6 +1358,7 @@ export default function UserPage() {
                       className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 gap-4"
                     >
                       <span className="text-sm text-gray-500">{row.label}</span>
+
                       <span className="text-sm font-semibold text-gray-900 text-right break-all">
                         {row.value}
                       </span>
@@ -1023,8 +1372,14 @@ export default function UserPage() {
 
       {selectedMedia && (
         <div
-          className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4 select-none"
           onClick={() => setSelectedMedia(null)}
+          onContextMenu={(e) => e.preventDefault()}
+          style={{
+            WebkitUserSelect: "none",
+            userSelect: "none",
+            WebkitTouchCallout: "none",
+          }}
         >
           <button
             type="button"
@@ -1032,14 +1387,20 @@ export default function UserPage() {
               e.stopPropagation();
               setSelectedMedia(null);
             }}
-            className="absolute top-4 right-4 z-10 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors"
+            className="absolute top-4 right-4 z-50 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors"
           >
             <X size={24} />
           </button>
 
           <div
-            className="max-w-[95vw] max-h-[95vh] flex items-center justify-center"
+            className="relative max-w-[95vw] max-h-[95vh] flex items-center justify-center select-none"
             onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{
+              WebkitUserSelect: "none",
+              userSelect: "none",
+              WebkitTouchCallout: "none",
+            }}
           >
             {selectedMedia.type === "video" ? (
               <video
@@ -1047,15 +1408,36 @@ export default function UserPage() {
                 controls
                 autoPlay
                 playsInline
+                controlsList="nodownload noplaybackrate"
+                disablePictureInPicture
+                onContextMenu={blockMediaDownload}
+                onDragStart={blockMediaDownload}
                 className="max-w-full max-h-[90vh] rounded-xl"
               />
             ) : (
               <img
                 src={selectedMedia.src}
                 alt="Full screen media"
-                className="max-w-full max-h-[90vh] object-contain rounded-xl"
+                draggable={false}
+                onContextMenu={blockMediaDownload}
+                onDragStart={blockMediaDownload}
+                onMouseDown={(e) => {
+                  if (e.button === 2) blockMediaDownload(e);
+                }}
+                className="max-w-full max-h-[90vh] object-contain rounded-xl select-none"
+                style={{
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src =
+                    "/placeholder.jpg";
+                }}
               />
             )}
+
+            <RepeatedWatermark text={getWatermarkText()} />
           </div>
         </div>
       )}

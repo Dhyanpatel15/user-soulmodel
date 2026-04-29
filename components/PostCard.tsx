@@ -9,21 +9,26 @@ import {
   Bookmark,
   Lock,
   BadgeCheck,
-  ChevronDown,
-  ChevronUp,
-  Send,
   Play,
   X,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { interactApi, mediaUrl, browseApi, subscriptionsApi } from "@/lib/api";
+import {
+  interactApi,
+  mediaUrl,
+  browseApi,
+  subscriptionsApi,
+  userProfileApi,
+} from "@/lib/api";
 
 interface Post {
   id: string | number;
   creator?: any;
   creator_id?: string | number;
   user_id?: string | number;
+  user?: any;
+  profile?: any;
   title?: string;
   caption?: string;
   content?: string;
@@ -73,6 +78,7 @@ function getSafeNumber(...values: any[]): number {
     const num = Number(value);
     if (!Number.isNaN(num) && Number.isFinite(num)) return num;
   }
+
   return 0;
 }
 
@@ -92,6 +98,58 @@ function timeAgo(dateStr?: string): string {
   if (hrs < 24) return `${hrs}h ago`;
 
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function getStringValue(value: any): string {
+  if (value === null || value === undefined) return "";
+
+  const str = String(value).trim();
+
+  if (!str) return "";
+  if (str.toLowerCase() === "null") return "";
+  if (str.toLowerCase() === "undefined") return "";
+  if (str.toLowerCase() === "user") return "";
+
+  return str;
+}
+
+function extractLoggedInUsername(data: any): string {
+  if (!data) return "";
+
+  const possibleUsers = [
+    data,
+    data?.data,
+    data?.user,
+    data?.profile,
+    data?.current_user,
+    data?.currentUser,
+    data?.logged_in_user,
+    data?.loggedInUser,
+    data?.auth_user,
+    data?.authUser,
+    data?.data?.user,
+    data?.data?.profile,
+    data?.data?.current_user,
+    data?.data?.currentUser,
+    data?.data?.logged_in_user,
+    data?.data?.loggedInUser,
+    data?.data?.auth_user,
+    data?.data?.authUser,
+  ];
+
+  for (const user of possibleUsers) {
+    const username =
+      getStringValue(user?.username) ||
+      getStringValue(user?.user_name) ||
+      getStringValue(user?.handle) ||
+      getStringValue(user?.display_name) ||
+      getStringValue(user?.full_name) ||
+      getStringValue(user?.name);
+
+    if (username) return username;
+  }
+
+  return "";
 }
 
 function getMediaItems(post: any) {
@@ -154,6 +212,7 @@ function getMediaItems(post: any) {
 
     if (typeof value !== "object") return;
     if (visited.has(value)) return;
+
     visited.add(value);
 
     if (Array.isArray(value)) {
@@ -220,6 +279,7 @@ function getMediaItems(post: any) {
   };
 
   scan(post);
+
   return mediaItems;
 }
 
@@ -294,6 +354,8 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
     Boolean(post?.is_subscribed || post?.creator?.is_subscribed)
   );
 
+  const [loggedInUsername, setLoggedInUsername] = useState<string>("");
+
   useEffect(() => {
     setLiked(Boolean(post.is_liked ?? post.liked ?? post.has_liked ?? false));
     setBookmarked(Boolean(post.is_bookmarked));
@@ -303,10 +365,136 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
     setCommentsCount(getSafeNumber(post.comments_count, post.comment_count, 0));
   }, [post]);
 
+  useEffect(() => {
+    const blockKeys = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+
+      if (
+        (e.ctrlKey && key === "s") ||
+        (e.ctrlKey && key === "u") ||
+        (e.ctrlKey && e.shiftKey && key === "i") ||
+        (e.ctrlKey && e.shiftKey && key === "j") ||
+        key === "f12"
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    document.addEventListener("keydown", blockKeys);
+
+    return () => {
+      document.removeEventListener("keydown", blockKeys);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const getUsernameFromLocalStorage = () => {
+      if (typeof window === "undefined") return "";
+
+      const directKeys = [
+        "username",
+        "user_name",
+        "loggedInUsername",
+        "currentUsername",
+        "name",
+      ];
+
+      for (const key of directKeys) {
+        const value = getStringValue(localStorage.getItem(key));
+        if (value) return value;
+      }
+
+      const objectKeys = [
+        "user",
+        "authUser",
+        "currentUser",
+        "loggedInUser",
+        "profile",
+        "userData",
+        "auth",
+        "session",
+        "account",
+      ];
+
+      for (const key of objectKeys) {
+        const value = localStorage.getItem(key);
+
+        if (!value) continue;
+
+        try {
+          const parsed = JSON.parse(value);
+          const username = extractLoggedInUsername(parsed);
+
+          if (username) return username;
+        } catch {
+          continue;
+        }
+      }
+
+      return "";
+    };
+
+    const loadLoggedInUsername = async () => {
+      try {
+        const localUsername = getUsernameFromLocalStorage();
+
+        if (localUsername && active) {
+          setLoggedInUsername(localUsername);
+          return;
+        }
+
+        const profile = await userProfileApi.getMe();
+
+        console.log("Logged-in profile for watermark:", profile);
+
+        const username = extractLoggedInUsername(profile);
+
+        if (username && active) {
+          setLoggedInUsername(username);
+
+          if (typeof window !== "undefined") {
+            localStorage.setItem("loggedInUsername", username);
+          }
+
+          return;
+        }
+
+        console.error(
+          "Username not found in profile response. Please make sure backend sends username."
+        );
+      } catch (error) {
+        console.error("Failed to load logged-in username for watermark:", error);
+      }
+    };
+
+    loadLoggedInUsername();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const blockImageDownload = (
+    e:
+      | React.SyntheticEvent
+      | React.MouseEvent
+      | React.DragEvent
+      | React.TouchEvent
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const creator = post.creator || post.user || post.profile || {};
+
   const creatorId = creator.id || post.creator_id || post.user_id;
+
   const creatorUsername =
     creator.username || creator.user_name || creator.handle || "";
+
   const creatorDisplayName =
     creator.display_name ||
     creator.full_name ||
@@ -330,7 +518,6 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
       post.ppv ??
       post.is_paid ??
       post.paid_post ??
-      // (post.visibility === "premium") ??
       (post.visibility === "ppv")
   );
 
@@ -345,6 +532,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
       try {
         const res: any = await subscriptionsApi.getMySubscriptions();
+
         const list = Array.isArray(res?.data)
           ? res.data
           : Array.isArray(res)
@@ -352,10 +540,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
           : [];
 
         const subscribed = list.some((item: any) => {
-          const subCreatorId =
-            item?.creator_id ??
-            item?.creator?.id ??
-            item?.id;
+          const subCreatorId = item?.creator_id ?? item?.creator?.id ?? item?.id;
 
           return String(subCreatorId) === String(creatorId);
         });
@@ -366,6 +551,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
         }
       } catch (error) {
         console.error("Failed to check subscriptions", error);
+
         if (active) {
           setViewerSubscribed(
             Boolean(post?.is_subscribed || post?.creator?.is_subscribed)
@@ -389,13 +575,13 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
   const activeMedia = mediaItems[viewerIndex];
 
   const postCaption =
-    post.caption ||
-    post.content ||
-    post.description ||
-    post.text ||
-    "";
+    post.caption || post.content || post.description || post.text || "";
 
-  const watermarkText = `@${creatorUsername || creatorDisplayName}`;
+  const cleanWatermarkName = loggedInUsername || "User";
+
+  const watermarkText = cleanWatermarkName.startsWith("@")
+    ? cleanWatermarkName
+    : `@${cleanWatermarkName}`;
 
   const RepeatedWatermark = () => (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-10">
@@ -498,6 +684,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
   const handleLike = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
+
     if (likeLoading) return;
 
     const prevLiked = liked;
@@ -520,8 +707,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
         typeof res?.liked === "boolean" ? res.liked : optimisticLiked;
 
       const serverCount =
-        typeof res?.likes_count === "number" &&
-        Number.isFinite(res.likes_count)
+        typeof res?.likes_count === "number" && Number.isFinite(res.likes_count)
           ? res.likes_count
           : undefined;
 
@@ -551,6 +737,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
   const handleBookmark = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
+
     if (bookmarkLoading || !creatorId) return;
 
     const prev = bookmarked;
@@ -607,6 +794,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
   const submitComment = async () => {
     const text = commentText.trim();
+
     if (!text || commentSubmitting) return;
 
     setCommentSubmitting(true);
@@ -616,6 +804,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
       if (res?.comment) {
         setComments((prev) => [...prev, normalizeCommentUI(res.comment)]);
+
         setCommentsCount((prev) =>
           getSafeNumber(res?.comments_count, res?.comment_count, prev + 1)
         );
@@ -626,6 +815,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
           : [];
 
         setComments(list.map(normalizeCommentUI));
+
         setCommentsCount(
           getSafeNumber(
             freshComments?.comments_count,
@@ -649,7 +839,13 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
     <>
       <div
         onClick={openCreator}
-        className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 cursor-pointer"
+        onContextMenu={(e) => e.preventDefault()}
+        className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 cursor-pointer select-none"
+        style={{
+          WebkitUserSelect: "none",
+          userSelect: "none",
+          WebkitTouchCallout: "none",
+        }}
       >
         <div className="flex items-center gap-3 p-4">
           <Link
@@ -660,9 +856,17 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
               <img
                 src={mediaUrl(creatorAvatar)}
                 alt={creatorDisplayName}
-                className="w-11 h-11 rounded-full object-cover border-2 border-pink-100"
+                draggable={false}
+                onContextMenu={blockImageDownload}
+                onDragStart={blockImageDownload}
+                className="w-11 h-11 rounded-full object-cover border-2 border-pink-100 select-none"
+                style={{
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                }}
                 onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                  e.currentTarget.src = "/placeholder.jpg";
                 }}
               />
             ) : (
@@ -681,6 +885,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
               <span className="font-semibold text-gray-900 text-sm hover:text-[#e8125c] transition-colors">
                 {creatorDisplayName}
               </span>
+
               {creatorVerified && (
                 <BadgeCheck size={15} className="text-[#e8125c]" />
               )}
@@ -710,7 +915,15 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
         )}
 
         {firstMedia && (
-          <div className="relative overflow-hidden">
+          <div
+            className="relative overflow-hidden select-none"
+            onContextMenu={(e) => e.preventDefault()}
+            style={{
+              WebkitUserSelect: "none",
+              userSelect: "none",
+              WebkitTouchCallout: "none",
+            }}
+          >
             {firstMedia.type === "video" ? (
               <>
                 <video
@@ -719,15 +932,21 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                     isLocked ? "blur-xl brightness-75 scale-105" : ""
                   }`}
                   controls={!isLocked}
+                  controlsList="nodownload noplaybackrate"
+                  disablePictureInPicture
                   muted
                   playsInline
                   preload="metadata"
+                  onContextMenu={blockImageDownload}
+                  onDragStart={blockImageDownload}
                   onClick={(e) => {
                     e.stopPropagation();
+
                     if (isLocked) {
                       openCreator();
                       return;
                     }
+
                     openViewer(0);
                   }}
                 />
@@ -737,6 +956,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                     <div className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 z-20">
                       <Play size={14} />
                     </div>
+
                     <RepeatedWatermark />
                   </>
                 )}
@@ -746,19 +966,32 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                 <img
                   src={mediaUrl(firstMedia.url)}
                   alt="Post media"
-                  className={`w-full object-cover max-h-96 ${
+                  draggable={false}
+                  onContextMenu={blockImageDownload}
+                  onDragStart={blockImageDownload}
+                  onMouseDown={(e) => {
+                    if (e.button === 2) blockImageDownload(e);
+                  }}
+                  className={`w-full object-cover max-h-96 select-none pointer-events-auto ${
                     isLocked ? "blur-xl brightness-75 scale-105" : ""
                   }`}
+                  style={{
+                    WebkitUserSelect: "none",
+                    userSelect: "none",
+                    WebkitTouchCallout: "none",
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
+
                     if (isLocked) {
                       openCreator();
                       return;
                     }
+
                     openViewer(0);
                   }}
                   onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = "/placeholder.jpg";
+                    e.currentTarget.src = "/placeholder.jpg";
                   }}
                 />
 
@@ -770,7 +1003,9 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white">
                 <div className="bg-black/35 backdrop-blur-sm rounded-2xl p-6 text-center border border-white/20">
                   <Lock size={32} className="mx-auto mb-2" />
+
                   <p className="font-semibold text-sm">Paid Post Preview</p>
+
                   <p className="text-xs text-white/85 mt-1">
                     Subscribe to unlock this content
                   </p>
@@ -789,8 +1024,14 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
 
       {showViewer && activeMedia && !isLocked && (
         <div
-          className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center"
+          className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center select-none"
           onClick={closeViewer}
+          onContextMenu={(e) => e.preventDefault()}
+          style={{
+            WebkitUserSelect: "none",
+            userSelect: "none",
+            WebkitTouchCallout: "none",
+          }}
         >
           <button
             className="absolute top-4 right-4 z-20 text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
@@ -821,21 +1062,42 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
           )}
 
           <div
-            className="relative w-full h-full flex items-center justify-center px-4 py-10"
+            className="relative w-full h-full flex items-center justify-center px-4 py-10 select-none"
             onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{
+              WebkitUserSelect: "none",
+              userSelect: "none",
+              WebkitTouchCallout: "none",
+            }}
           >
             {activeMedia.type === "video" ? (
               <video
                 src={mediaUrl(activeMedia.url)}
                 controls
                 autoPlay
+                controlsList="nodownload noplaybackrate"
+                disablePictureInPicture
+                onContextMenu={blockImageDownload}
+                onDragStart={blockImageDownload}
                 className="max-w-[95vw] max-h-[90vh] rounded-xl"
               />
             ) : (
               <img
                 src={mediaUrl(activeMedia.url)}
                 alt="Full preview"
-                className="max-w-[95vw] max-h-[90vh] object-contain rounded-xl"
+                draggable={false}
+                onContextMenu={blockImageDownload}
+                onDragStart={blockImageDownload}
+                onMouseDown={(e) => {
+                  if (e.button === 2) blockImageDownload(e);
+                }}
+                className="max-w-[95vw] max-h-[90vh] object-contain rounded-xl select-none"
+                style={{
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                }}
               />
             )}
 

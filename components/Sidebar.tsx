@@ -4,7 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { mediaUrl, notificationsApi, creatorRequestApi} from "@/lib/api";
+import {
+  mediaUrl,
+  notificationsApi,
+  creatorRequestApi,
+  userProfileApi,
+} from "@/lib/api";
 import {
   Rss,
   LayoutGrid,
@@ -28,9 +33,51 @@ const navItems = [
   { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
 ];
 
+const getDisplayName = (user: any) => {
+  return (
+    user?.display_name?.trim?.() ||
+    user?.full_name?.trim?.() ||
+    user?.name?.trim?.() ||
+    user?.username?.trim?.() ||
+    user?.email?.split("@")?.[0] ||
+    "User"
+  );
+};
+
+const getUsername = (user: any) => {
+  return (
+    user?.username?.trim?.() ||
+    user?.user_name?.trim?.() ||
+    user?.handle?.trim?.() ||
+    user?.email?.split("@")?.[0] ||
+    ""
+  );
+};
+
+const getAvatar = (user: any) => {
+  return (
+    user?.avatar_url ||
+    user?.avatar ||
+    user?.profile_image ||
+    user?.profile_picture ||
+    user?.image ||
+    user?.user?.avatar_url ||
+    user?.user?.avatar ||
+    user?.user?.profile_image ||
+    user?.user?.profile_picture ||
+    user?.profile?.avatar_url ||
+    user?.profile?.avatar ||
+    user?.profile?.profile_image ||
+    user?.profile?.profile_picture ||
+    ""
+  );
+};
+
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, logout, loading, token } = useAuth();
+
+  const [sidebarUser, setSidebarUser] = useState<any>(user || null);
   const [imageError, setImageError] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -38,71 +85,125 @@ export default function Sidebar() {
   const [popupMessage, setPopupMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const displayName = useMemo(
-    () =>
-      user?.display_name?.trim() ||
-      user?.full_name?.trim() ||
-      user?.username?.trim() ||
-      user?.email?.split("@")?.[0] ||
-      "User",
-    [user]
-  );
+  useEffect(() => {
+    if (user) {
+      setSidebarUser(user);
+    }
+  }, [user]);
 
-  const username = useMemo(
-    () => user?.username?.trim() || user?.email?.split("@")?.[0] || "",
-    [user]
-  );
+  useEffect(() => {
+    if (!token) return;
 
-  const rawAvatar = useMemo(() => user?.avatar || user?.avatar_url || "", [user]);
-  const avatarSrc = useMemo(() => (rawAvatar ? mediaUrl(rawAvatar, true) : ""), [rawAvatar]);
+    let isMounted = true;
 
-  const initials = useMemo(
-    () =>
-      (displayName || "U")
-        .split(" ")
-        .filter(Boolean)
-        .map((w) => w[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2),
-    [displayName]
-  );
+    const fetchProfile = async () => {
+      try {
+        const res: any = await userProfileApi.getMe();
+
+        if (!isMounted) return;
+
+        setSidebarUser(res);
+      } catch (error) {
+        if (!isMounted) return;
+
+        if (user) {
+          setSidebarUser(user);
+        }
+      }
+    };
+
+    fetchProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token, user]);
+
+  const displayName = useMemo(() => {
+    return getDisplayName(sidebarUser);
+  }, [sidebarUser]);
+
+  const username = useMemo(() => {
+    return getUsername(sidebarUser);
+  }, [sidebarUser]);
+
+  const rawAvatar = useMemo(() => {
+    return getAvatar(sidebarUser);
+  }, [sidebarUser]);
+
+  const avatarSrc = useMemo(() => {
+    if (!rawAvatar) return "";
+    return mediaUrl(rawAvatar, true);
+  }, [rawAvatar]);
+
+  const initials = useMemo(() => {
+    return (displayName || "U")
+      .split(" ")
+      .filter(Boolean)
+      // .map((word) => word[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }, [displayName]);
 
   useEffect(() => {
     setImageError(false);
   }, [avatarSrc]);
 
   useEffect(() => {
-    notificationsApi
-      .getUnreadCount()
-      .then((res: any) => {
-        const count = res?.count ?? res?.unread_count ?? res?.data?.count ?? 0;
+    if (!token) return;
+
+    let isMounted = true;
+
+    const fetchUnreadCount = async () => {
+      try {
+        const res: any = await notificationsApi.getUnreadCount();
+
+        if (!isMounted) return;
+
+        const count =
+          res?.count ??
+          res?.unread_count ??
+          res?.data?.count ??
+          res?.data?.unread_count ??
+          0;
+
         setUnreadCount(Number(count) || 0);
-      })
-      .catch(() => setUnreadCount(0));
-  }, [pathname]);
+      } catch (error) {
+        if (!isMounted) return;
+        setUnreadCount(0);
+      }
+    };
+
+    fetchUnreadCount();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [pathname, token]);
 
   const handleBecomeCreator = async () => {
-  if (isSubmitting) return;
+    if (isSubmitting) return;
 
-  try {
-    setIsSubmitting(true);
+    try {
+      setIsSubmitting(true);
 
-    const data = await creatorRequestApi.becomeCreator();
+      const data: any = await creatorRequestApi.becomeCreator();
 
-    setPopupMessage(
-      data?.message ||
-      data?.data?.message ||
-      "Your request has been sent successfully."
-    );
-    setShowPopup(true);
-  } catch (error: any) {
-    setPopupMessage(error?.message || "Something went wrong. Please try again.");
-    setShowPopup(true);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+      setPopupMessage(
+        data?.message ||
+          data?.data?.message ||
+          "Your request has been sent successfully."
+      );
+
+      setShowPopup(true);
+    } catch (error: any) {
+      setPopupMessage(error?.message || "Something went wrong. Please try again.");
+      setShowPopup(true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <>
@@ -111,26 +212,33 @@ export default function Sidebar() {
           <div className="w-8 h-8 bg-gradient-to-br from-[#e8125c] to-rose-400 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
             <span className="text-white font-black text-sm">S</span>
           </div>
-          <span className="font-black text-gray-900 text-base tracking-tight">Soulmodel</span>
+
+          <span className="font-black text-gray-900 text-base tracking-tight">
+            Soulmodel
+          </span>
         </div>
 
         <div className="px-5 py-4 border-b border-gray-100">
-          {loading ? (
+          {loading && !sidebarUser ? (
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gray-200 animate-pulse flex-shrink-0" />
+
               <div className="min-w-0 flex-1 space-y-2">
                 <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
                 <div className="h-3 w-16 bg-gray-100 rounded animate-pulse" />
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-3">
+            <Link
+              href="/profile"
+              className="flex items-center gap-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
+            >
               {avatarSrc && !imageError ? (
                 <img
                   key={avatarSrc}
                   src={avatarSrc}
                   alt={displayName}
-                  className="w-10 h-10 rounded-full object-cover border-2 border-pink-100 flex-shrink-0"
+                  className="w-10 h-10 rounded-full object-cover border-2 border-pink-100 flex-shrink-0 bg-pink-50"
                   onError={() => setImageError(true)}
                 />
               ) : (
@@ -138,11 +246,17 @@ export default function Sidebar() {
                   {initials}
                 </div>
               )}
+
               <div className="overflow-hidden min-w-0">
-                <p className="font-semibold text-gray-900 text-sm truncate">{displayName}</p>
-                <p className="text-xs text-gray-400 truncate">{username ? `@${username}` : ""}</p>
+                <p className="font-semibold text-gray-900 text-sm truncate">
+                  {displayName}
+                </p>
+
+                <p className="text-xs text-gray-400 truncate">
+                  {username ? `@${username}` : "Complete your profile"}
+                </p>
               </div>
-            </div>
+            </Link>
           )}
         </div>
 
@@ -162,6 +276,7 @@ export default function Sidebar() {
                 }`}
               >
                 <Icon size={19} className={isActive ? "text-[#e8125c]" : ""} />
+
                 <span className="flex-1">{label}</span>
 
                 {isNotif && unreadCount > 0 && (
@@ -200,7 +315,10 @@ export default function Sidebar() {
       {showPopup && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[100]">
           <div className="bg-white w-[90%] max-w-sm rounded-2xl shadow-xl p-6 text-center">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Message</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+              Message
+            </h2>
+
             <p className="text-sm text-gray-600">{popupMessage}</p>
 
             <button

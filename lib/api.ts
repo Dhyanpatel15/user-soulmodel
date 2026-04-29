@@ -1,587 +1,129 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const API = `${BASE_URL}/api/v1`;
 
-// ─── Token helpers ───────────────────────────────────────────────────────────
-export const getToken = (): string | null => {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("access_token");
-};
-
-export const setToken = (token: string) => {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("access_token", token);
-};
-
-export const removeToken = () => {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("access_token");
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type AnyObj = Record<string, any>;
 
-const buildQueryString = (params: Record<string, any>) => {
-  const searchParams = new URLSearchParams();
-
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
-      searchParams.append(key, String(value));
-    }
-  });
-
-  const qs = searchParams.toString();
-  return qs ? `?${qs}` : "";
+const isBrowser = () => typeof window !== "undefined";
+const asObj = (v: any): AnyObj => (v && typeof v === "object" ? v : {});
+const toNum = (v: any, fallback = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 };
 
-const getSafeNumber = (...values: any[]): number => {
-  for (const value of values) {
-    const num = Number(value);
-    if (!Number.isNaN(num) && Number.isFinite(num)) return num;
+const first = (...values: any[]) =>
+  values.find((v) => v !== undefined && v !== null && v !== "") ?? "";
+
+const firstNum = (...values: any[]) => {
+  for (const v of values) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
   }
   return 0;
 };
 
-const getErrorMessage = (err: any): string => {
+const boolFrom = (...values: any[]) => Boolean(first(...values, false));
+
+const buildQueryString = (params: AnyObj = {}) => {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") qs.append(k, String(v));
+  });
+  return qs.toString() ? `?${qs}` : "";
+};
+
+const errMsg = (err: any): string => {
   if (!err) return "";
-
   if (typeof err === "string") return err;
-
   if (typeof err === "object") {
     return err.message || err.error || err.detail || JSON.stringify(err);
   }
-
   return String(err);
 };
 
-const normalizeStatus = (status: any): string => {
-  const value = String(status || "").toLowerCase();
+// ─── Token helpers ───────────────────────────────────────────────────────────
+// ─── Token helpers ───────────────────────────────────────────────────────────
+export const getToken = () =>
+  isBrowser() ? localStorage.getItem("access_token") : null;
 
-  if (!value) return "success";
-  if (["paid", "completed", "success", "succeeded"].includes(value)) return "success";
-  if (["failed", "error", "cancelled", "canceled"].includes(value)) return "failed";
-  if (["pending", "processing"].includes(value)) return "pending";
+export const clearLoggedInUserCache = () => {
+  if (!isBrowser()) return;
 
-  return value;
+  localStorage.removeItem("loggedInUsername");
+  localStorage.removeItem("loggedInUsernameToken");
+
+  localStorage.removeItem("username");
+  localStorage.removeItem("user_name");
+  localStorage.removeItem("currentUsername");
+
+  localStorage.removeItem("user");
+  localStorage.removeItem("authUser");
+  localStorage.removeItem("currentUser");
+  localStorage.removeItem("loggedInUser");
+  localStorage.removeItem("profile");
+  localStorage.removeItem("userData");
+  localStorage.removeItem("account");
 };
 
-const detectFlow = (item: any = {}): "credit" | "debit" => {
-  const explicitFlow = String(
-    item?.flow ||
-      item?.transaction_flow ||
-      item?.metadata_?.flow ||
-      item?.metadata?.flow ||
-      ""
-  ).toLowerCase();
+export const setToken = (token: string) => {
+  if (!isBrowser()) return;
 
-  if (explicitFlow === "credit" || explicitFlow === "debit") {
-    return explicitFlow;
+  const oldToken = localStorage.getItem("access_token");
+
+  if (oldToken && oldToken !== token) {
+    clearLoggedInUserCache();
   }
 
-  const rawType = String(
-    item?.type ||
-      item?.transaction_type ||
-      item?.entry_type ||
-      item?.kind ||
-      ""
-  ).toLowerCase();
-
-  const creditTypes = [
-    "deposit",
-    "credit",
-    "refund",
-    "topup",
-    "top_up",
-    "wallet_credit",
-    "added",
-  ];
-
-  const debitTypes = [
-    "ppv",
-    "subscription",
-    "gift",
-    "unlock",
-    "payment",
-    "purchase",
-    "debit",
-    "spent",
-    "deducted",
-    "withdrawal",
-  ];
-
-  if (creditTypes.some((t) => rawType.includes(t))) return "credit";
-  if (debitTypes.some((t) => rawType.includes(t))) return "debit";
-
-  const amount = Number(item?.amount ?? 0);
-  return amount < 0 ? "debit" : "credit";
+  localStorage.setItem("access_token", token);
 };
+
+export const removeToken = () => {
+  if (!isBrowser()) return;
+
+  localStorage.removeItem("access_token");
+  clearLoggedInUserCache();
+};
+
+// ─── Unwrap helpers ──────────────────────────────────────────────────────────
+const listKeys = [
+  "data",
+  "items",
+  "results",
+  "posts",
+  "rows",
+  "notifications",
+  "creators",
+  "comments",
+  "transactions",
+  "payments",
+];
 
 export const unwrapList = <T = any>(response: any): T[] => {
   if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.data)) return response.data;
-  if (Array.isArray(response?.items)) return response.items;
-  if (Array.isArray(response?.results)) return response.results;
-  if (Array.isArray(response?.posts)) return response.posts;
-  if (Array.isArray(response?.rows)) return response.rows;
-  if (Array.isArray(response?.notifications)) return response.notifications;
-  if (Array.isArray(response?.creators)) return response.creators;
-  if (Array.isArray(response?.comments)) return response.comments;
-  if (Array.isArray(response?.transactions)) return response.transactions;
-  if (Array.isArray(response?.payments)) return response.payments;
-  if (Array.isArray(response?.data?.posts)) return response.data.posts;
-  if (Array.isArray(response?.data?.comments)) return response.data.comments;
-  if (Array.isArray(response?.data?.items)) return response.data.items;
-  if (Array.isArray(response?.data?.results)) return response.data.results;
-  if (Array.isArray(response?.data?.transactions)) return response.data.transactions;
-  if (Array.isArray(response?.data?.payments)) return response.data.payments;
+
+  for (const key of listKeys) {
+    if (Array.isArray(response?.[key])) return response[key];
+    if (Array.isArray(response?.data?.[key])) return response.data[key];
+  }
+
   return [];
 };
 
 export const unwrapItem = <T = any>(response: any): T => {
-  if (response?.data && !Array.isArray(response.data)) return response.data;
-  if (response?.item && !Array.isArray(response.item)) return response.item;
-  if (response?.post && !Array.isArray(response.post)) return response.post;
-  if (response?.creator && !Array.isArray(response.creator)) return response.creator;
-  if (response?.wallet && !Array.isArray(response.wallet)) return response.wallet;
-  if (response?.payment && !Array.isArray(response.payment)) return response.payment;
-  if (response?.transaction && !Array.isArray(response.transaction)) return response.transaction;
-  if (response?.comment && !Array.isArray(response.comment)) return response.comment;
+  for (const key of [
+    "data",
+    "item",
+    "post",
+    "creator",
+    "wallet",
+    "payment",
+    "transaction",
+    "comment",
+  ]) {
+    if (response?.[key] && !Array.isArray(response[key])) return response[key];
+  }
+
   return response;
-};
-
-const normalizeCreator = (creator: any = {}) => {
-  const data = creator?.data || {};
-  const nestedCreator =
-    creator?.creator ||
-    data?.creator ||
-    creator?.profile ||
-    data?.profile ||
-    creator ||
-    {};
-
-  const subscription =
-    creator?.subscription ||
-    data?.subscription ||
-    nestedCreator?.subscription ||
-    {};
-
-  const user =
-    nestedCreator?.user ||
-    creator?.user ||
-    data?.user ||
-    {};
-
-  const subscriptionPrice = Number(
-    subscription?.subscription_price ??
-      subscription?.price ??
-      subscription?.monthly_price ??
-      nestedCreator?.subscription_price ??
-      nestedCreator?.price ??
-      nestedCreator?.monthly_price ??
-      creator?.subscription_price ??
-      creator?.price ??
-      creator?.monthly_price ??
-      user?.subscription_price ??
-      user?.price ??
-      user?.monthly_price ??
-      0
-  );
-
-  const isSubscribed = Boolean(
-    subscription?.is_subscribed ??
-      subscription?.subscribed ??
-      nestedCreator?.is_subscribed ??
-      nestedCreator?.subscribed ??
-      creator?.is_subscribed ??
-      creator?.subscribed ??
-      false
-  );
-
-  return {
-    ...creator,
-    ...nestedCreator,
-
-    id:
-      nestedCreator?.id ??
-      nestedCreator?.creator_id ??
-      nestedCreator?.user_id ??
-      creator?.id ??
-      creator?.creator_id ??
-      creator?.user_id ??
-      user?.id ??
-      null,
-
-    username:
-      nestedCreator?.username ||
-      nestedCreator?.user_name ||
-      nestedCreator?.handle ||
-      creator?.username ||
-      creator?.user_name ||
-      creator?.handle ||
-      user?.username ||
-      user?.user_name ||
-      "",
-
-    display_name:
-      nestedCreator?.display_name ||
-      nestedCreator?.full_name ||
-      nestedCreator?.name ||
-      creator?.display_name ||
-      creator?.full_name ||
-      creator?.name ||
-      user?.display_name ||
-      user?.full_name ||
-      user?.name ||
-      nestedCreator?.username ||
-      user?.username ||
-      "Creator",
-
-    avatar_url:
-      nestedCreator?.avatar_url ||
-      nestedCreator?.avatar ||
-      nestedCreator?.profile_image ||
-      nestedCreator?.profile_picture ||
-      nestedCreator?.image ||
-      creator?.avatar_url ||
-      creator?.avatar ||
-      creator?.profile_image ||
-      creator?.profile_picture ||
-      creator?.image ||
-      user?.avatar_url ||
-      user?.avatar ||
-      user?.profile_image ||
-      user?.profile_picture ||
-      "",
-
-    cover_photo_url:
-      nestedCreator?.cover_photo_url ||
-      nestedCreator?.cover_image ||
-      nestedCreator?.cover ||
-      nestedCreator?.banner ||
-      nestedCreator?.header_image ||
-      creator?.cover_photo_url ||
-      creator?.cover_image ||
-      creator?.cover ||
-      creator?.banner ||
-      creator?.header_image ||
-      user?.cover_photo_url ||
-      user?.cover_image ||
-      user?.cover ||
-      user?.banner ||
-      "",
-
-    is_verified: Boolean(
-      nestedCreator?.is_verified ||
-        nestedCreator?.verified ||
-        creator?.is_verified ||
-        creator?.verified ||
-        user?.is_verified ||
-        user?.verified
-    ),
-
-    is_subscribed: isSubscribed,
-
-    is_free: Boolean(
-      nestedCreator?.is_free === true ||
-        creator?.is_free === true ||
-        user?.is_free === true ||
-        subscriptionPrice === 0
-    ),
-
-    subscription_price: subscriptionPrice,
-
-    bio:
-      nestedCreator?.bio ||
-      nestedCreator?.description ||
-      nestedCreator?.about ||
-      creator?.bio ||
-      creator?.description ||
-      creator?.about ||
-      user?.bio ||
-      user?.description ||
-      "",
-
-    is_online: Boolean(
-      nestedCreator?.is_online ||
-        nestedCreator?.online ||
-        creator?.is_online ||
-        creator?.online ||
-        user?.is_online ||
-        user?.online
-    ),
-
-    subscribers_count: Number(
-      nestedCreator?.subscribers_count ??
-        nestedCreator?.total_subscribers ??
-        nestedCreator?.subscriber_count ??
-        creator?.subscribers_count ??
-        creator?.total_subscribers ??
-        creator?.subscriber_count ??
-        user?.subscribers_count ??
-        user?.total_subscribers ??
-        0
-    ),
-
-    subscription: {
-      ...(typeof subscription === "object" ? subscription : {}),
-      subscription_price: subscriptionPrice,
-      is_subscribed: isSubscribed,
-    },
-  };
-};
-
-const normalizeComment = (comment: any = {}) => {
-  const user = comment?.user || comment?.creator || comment?.author || {};
-
-  return {
-    ...comment,
-    id: comment?.id ?? comment?.comment_id ?? `${Date.now()}-${Math.random()}`,
-    content:
-      comment?.content ||
-      comment?.text ||
-      comment?.comment ||
-      comment?.body ||
-      comment?.message ||
-      "",
-    created_at: comment?.created_at || comment?.createdAt || null,
-    user: {
-      ...user,
-      id: user?.id ?? comment?.user_id ?? null,
-      username:
-        user?.username ||
-        user?.user_name ||
-        user?.handle ||
-        comment?.username ||
-        "User",
-      display_name:
-        user?.display_name ||
-        user?.full_name ||
-        user?.name ||
-        user?.username ||
-        comment?.username ||
-        "User",
-      avatar_url:
-        user?.avatar_url ||
-        user?.avatar ||
-        user?.profile_image ||
-        user?.profile_picture ||
-        "",
-    },
-  };
-};
-
-const normalizeCommentsList = (response: any) => {
-  const list =
-    Array.isArray(response)
-      ? response
-      : Array.isArray(response?.data)
-        ? response.data
-        : Array.isArray(response?.items)
-          ? response.items
-          : Array.isArray(response?.results)
-            ? response.results
-            : Array.isArray(response?.comments)
-              ? response.comments
-              : Array.isArray(response?.data?.comments)
-                ? response.data.comments
-                : [];
-
-  return list.map((item: any) => normalizeComment(item));
-};
-
-export const normalizePost = (post: any = {}) => {
-  const creator = normalizeCreator(post?.creator || post?.user || post?.profile || {});
-
-  const isPremiumPost = Boolean(
-    post?.is_premium ||
-      post?.is_ppv ||
-      post?.ppv ||
-      post?.is_paid ||
-      post?.paid_post ||
-      post?.visibility === "ppv" ||
-      post?.visibility === "premium"
-  );
-
-  const isSubscribedToCreator = Boolean(
-    post?.viewer_is_subscribed ??
-      post?.is_subscribed ??
-      post?.subscription_active ??
-      post?.has_subscription ??
-      post?.creator?.is_subscribed ??
-      creator?.is_subscribed ??
-      false
-  );
-
-  const normalizedCaption =
-    post?.caption ||
-    post?.content ||
-    post?.description ||
-    post?.text ||
-    "";
-
-  const likesCount = getSafeNumber(
-    post?.likes_count,
-    post?.like_count,
-    post?.total_likes,
-    post?.stats?.likes_count,
-    post?.stats?.like_count,
-    post?.stats?.total_likes,
-    Array.isArray(post?.likes) ? post.likes.length : undefined,
-    Array.isArray(post?.liked_by) ? post.liked_by.length : undefined
-  );
-
-  const commentsCount = getSafeNumber(
-    post?.comments_count,
-    post?.comment_count,
-    post?.total_comments,
-    post?.stats?.comments_count,
-    post?.stats?.comment_count,
-    post?.stats?.total_comments,
-    Array.isArray(post?.comments) ? post.comments.length : undefined
-  );
-
-  const is_locked = isPremiumPost && !isSubscribedToCreator;
-
-  return {
-    ...post,
-    creator,
-    creator_id: post?.creator_id ?? creator?.id ?? post?.user_id ?? null,
-    title: post?.title || "",
-    caption: normalizedCaption,
-    content: normalizedCaption,
-    description: normalizedCaption,
-    likes_count: likesCount,
-    comments_count: commentsCount,
-    like_count: likesCount,
-    comment_count: commentsCount,
-    is_liked: Boolean(
-      post?.is_liked ??
-        post?.liked ??
-        post?.viewer_has_liked ??
-        post?.meta?.is_liked
-    ),
-    is_bookmarked: Boolean(
-      post?.is_bookmarked ??
-        post?.bookmarked ??
-        post?.viewer_has_bookmarked
-    ),
-    is_premium: isPremiumPost,
-    is_ppv: isPremiumPost,
-    is_subscribed: isSubscribedToCreator,
-    can_view: !is_locked,
-    is_locked,
-  };
-};
-
-const normalizeListOfPosts = (response: any) => {
-  return unwrapList(response).map((item: any) => normalizePost(item));
-};
-
-const normalizeWallet = (wallet: any = {}) => {
-  return {
-    ...wallet,
-    id: wallet?.id ?? null,
-    balance: Number(wallet?.balance ?? wallet?.amount ?? 0),
-    currency: wallet?.currency || "USD",
-    created_at: wallet?.created_at || null,
-    updated_at: wallet?.updated_at || null,
-  };
-};
-
-export const normalizeTransaction = (tx: any = {}) => {
-  const flow = detectFlow(tx);
-  const rawAmount = Number(tx?.amount ?? tx?.transaction_amount ?? 0);
-  const amount = Math.abs(rawAmount);
-
-  return {
-    ...tx,
-    id: tx?.id ?? null,
-    type: String(
-      tx?.type ||
-        tx?.transaction_type ||
-        tx?.entry_type ||
-        tx?.kind ||
-        ""
-    ).toLowerCase(),
-    flow,
-    amount,
-    signed_amount: flow === "debit" ? -amount : amount,
-    currency: tx?.currency || "USD",
-    status: normalizeStatus(tx?.status),
-    title:
-      tx?.title ||
-      tx?.description ||
-      tx?.label ||
-      tx?.reason ||
-      (flow === "credit" ? "Wallet Credit" : "Wallet Debit"),
-    note:
-      tx?.note ||
-      tx?.message ||
-      tx?.metadata_?.note ||
-      tx?.metadata?.note ||
-      "",
-    reference_type: tx?.reference_type || null,
-    reference_id: tx?.reference_id ?? null,
-    creator_id: tx?.creator_id ?? null,
-    provider:
-      tx?.provider ||
-      tx?.metadata_?.provider ||
-      tx?.metadata?.provider ||
-      "",
-    provider_transaction_id:
-      tx?.provider_transaction_id ||
-      tx?.reference ||
-      tx?.metadata_?.payment_tx_id ||
-      tx?.metadata?.payment_tx_id ||
-      "",
-    created_at: tx?.created_at || tx?.date || tx?.timestamp || null,
-    metadata_: tx?.metadata_ || tx?.metadata || {},
-  };
-};
-
-const normalizeListOfTransactions = (response: any) => {
-  return unwrapList(response).map((item: any) => normalizeTransaction(item));
-};
-
-const normalizePayment = (payment: any = {}) => {
-  const rawAmount = Number(payment?.amount ?? payment?.transaction_amount ?? 0);
-  const flow = "debit";
-
-  return {
-    ...payment,
-    id: payment?.id ?? null,
-    provider: payment?.provider || "",
-    provider_transaction_id:
-      payment?.provider_transaction_id || payment?.reference || "",
-    amount: Math.abs(rawAmount),
-    signed_amount: -Math.abs(rawAmount),
-    currency: payment?.currency || "USD",
-    status: normalizeStatus(payment?.status || payment?.payment_status),
-    type: String(
-      payment?.type ||
-        payment?.transaction_type ||
-        payment?.entry_type ||
-        payment?.kind ||
-        "payment"
-    ).toLowerCase(),
-    flow,
-    title:
-      payment?.title ||
-      payment?.description ||
-      payment?.label ||
-      payment?.reason ||
-      "Payment",
-    note:
-      payment?.note ||
-      payment?.message ||
-      "",
-    created_at: payment?.created_at || payment?.date || payment?.timestamp || null,
-    creator: payment?.creator ? normalizeCreator(payment.creator) : payment?.creator,
-    recipient: payment?.recipient ? normalizeCreator(payment.recipient) : payment?.recipient,
-  };
-};
-
-const normalizeListOfPayments = (response: any) => {
-  return unwrapList(response).map((item: any) => normalizePayment(item));
 };
 
 // ─── Core fetch wrapper ──────────────────────────────────────────────────────
@@ -592,15 +134,11 @@ export async function apiFetch<T = any>(
   isFormData = false
 ): Promise<T> {
   const token = getToken();
-  const headers: HeadersInit = {};
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  if (!isFormData) {
-    headers["Content-Type"] = "application/json";
-  }
+  const headers: HeadersInit = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!isFormData ? { "Content-Type": "application/json" } : {}),
+  };
 
   let res: Response;
 
@@ -610,35 +148,594 @@ export async function apiFetch<T = any>(
       headers,
       body: isFormData ? body : body ? JSON.stringify(body) : undefined,
     });
-  } catch (error: any) {
+  } catch {
     throw new Error("Network error or CORS issue");
   }
 
-  const responseData = await res.json().catch(() => ({}));
+  if (res.status === 204) return {} as T;
+
+  const data = await res.json().catch(() => ({}));
 
   if (res.status === 401) {
     removeToken();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
+    if (isBrowser()) window.location.href = "/login";
     throw new Error("Unauthorized");
   }
 
   if (!res.ok) {
     throw new Error(
-      getErrorMessage(responseData?.detail) ||
-        getErrorMessage(responseData?.message) ||
-        getErrorMessage(responseData?.error) ||
+      errMsg(data?.detail) ||
+        errMsg(data?.message) ||
+        errMsg(data?.error) ||
         `Error ${res.status}`
     );
   }
 
-  if (res.status === 204) {
-    return {} as T;
+  return data;
+}
+
+// ─── Normalizers ─────────────────────────────────────────────────────────────
+const normalizeStatus = (status: any) => {
+  const s = String(status || "").toLowerCase();
+
+  if (!s || ["paid", "completed", "success", "succeeded"].includes(s)) {
+    return "success";
   }
 
-  return responseData;
-}
+  if (["failed", "error", "cancelled", "canceled"].includes(s)) {
+    return "failed";
+  }
+
+  if (["pending", "processing"].includes(s)) {
+    return "pending";
+  }
+
+  return s;
+};
+
+const detectFlow = (item: AnyObj = {}): "credit" | "debit" => {
+  const explicit = String(
+    first(
+      item.flow,
+      item.transaction_flow,
+      item.metadata_?.flow,
+      item.metadata?.flow
+    )
+  ).toLowerCase();
+
+  if (explicit === "credit" || explicit === "debit") return explicit;
+
+  const type = String(
+    first(item.type, item.transaction_type, item.entry_type, item.kind)
+  ).toLowerCase();
+
+  if (
+    [
+      "deposit",
+      "credit",
+      "refund",
+      "topup",
+      "top_up",
+      "wallet_credit",
+      "added",
+    ].some((t) => type.includes(t))
+  ) {
+    return "credit";
+  }
+
+  if (
+    [
+      "ppv",
+      "subscription",
+      "gift",
+      "unlock",
+      "payment",
+      "purchase",
+      "debit",
+      "spent",
+      "deducted",
+      "withdrawal",
+    ].some((t) => type.includes(t))
+  ) {
+    return "debit";
+  }
+
+  return toNum(item.amount) < 0 ? "debit" : "credit";
+};
+
+const normalizeCreator = (creator: AnyObj = {}) => {
+  const data = asObj(creator.data);
+  const nested = asObj(
+    first(creator.creator, data.creator, creator.profile, data.profile, creator)
+  );
+  const subscription = asObj(
+    first(creator.subscription, data.subscription, nested.subscription, {})
+  );
+  const user = asObj(first(nested.user, creator.user, data.user, {}));
+
+  const price = firstNum(
+    subscription.subscription_price,
+    subscription.price,
+    subscription.monthly_price,
+    nested.subscription_price,
+    nested.price,
+    nested.monthly_price,
+    creator.subscription_price,
+    creator.price,
+    creator.monthly_price,
+    user.subscription_price,
+    user.price,
+    user.monthly_price
+  );
+
+  const subscribed = boolFrom(
+    subscription.is_subscribed,
+    subscription.subscribed,
+    nested.is_subscribed,
+    nested.subscribed,
+    creator.is_subscribed,
+    creator.subscribed
+  );
+
+  return {
+    ...creator,
+    ...nested,
+
+    id: first(
+      nested.id,
+      nested.creator_id,
+      nested.user_id,
+      creator.id,
+      creator.creator_id,
+      creator.user_id,
+      user.id,
+      null
+    ),
+
+    username: first(
+      nested.username,
+      nested.user_name,
+      nested.handle,
+      creator.username,
+      creator.user_name,
+      creator.handle,
+      user.username,
+      user.user_name
+    ),
+
+    display_name: first(
+      nested.display_name,
+      nested.full_name,
+      nested.name,
+      creator.display_name,
+      creator.full_name,
+      creator.name,
+      user.display_name,
+      user.full_name,
+      user.name,
+      nested.username,
+      user.username,
+      "Creator"
+    ),
+
+    avatar_url: first(
+      nested.avatar_url,
+      nested.avatar,
+      nested.profile_image,
+      nested.profile_picture,
+      nested.image,
+      creator.avatar_url,
+      creator.avatar,
+      creator.profile_image,
+      creator.profile_picture,
+      creator.image,
+      user.avatar_url,
+      user.avatar,
+      user.profile_image,
+      user.profile_picture
+    ),
+
+    cover_photo_url: first(
+      nested.cover_photo_url,
+      nested.cover_image,
+      nested.cover,
+      nested.banner,
+      nested.header_image,
+      creator.cover_photo_url,
+      creator.cover_image,
+      creator.cover,
+      creator.banner,
+      creator.header_image,
+      user.cover_photo_url,
+      user.cover_image,
+      user.cover,
+      user.banner
+    ),
+
+    is_verified: boolFrom(
+      nested.is_verified,
+      nested.verified,
+      creator.is_verified,
+      creator.verified,
+      user.is_verified,
+      user.verified
+    ),
+
+    is_subscribed: subscribed,
+
+    is_free:
+      nested.is_free === true ||
+      creator.is_free === true ||
+      user.is_free === true ||
+      price === 0,
+
+    subscription_price: price,
+
+    bio: first(
+      nested.bio,
+      nested.description,
+      nested.about,
+      creator.bio,
+      creator.description,
+      creator.about,
+      user.bio,
+      user.description
+    ),
+
+    is_online: boolFrom(
+      nested.is_online,
+      nested.online,
+      creator.is_online,
+      creator.online,
+      user.is_online,
+      user.online
+    ),
+
+    subscribers_count: firstNum(
+      nested.subscribers_count,
+      nested.total_subscribers,
+      nested.subscriber_count,
+      creator.subscribers_count,
+      creator.total_subscribers,
+      creator.subscriber_count,
+      user.subscribers_count,
+      user.total_subscribers
+    ),
+
+    subscription: {
+      ...subscription,
+      subscription_price: price,
+      is_subscribed: subscribed,
+    },
+  };
+};
+
+const normalizeComment = (comment: AnyObj = {}) => {
+  const user = asObj(first(comment.user, comment.creator, comment.author, {}));
+
+  return {
+    ...comment,
+    id: first(comment.id, comment.comment_id, `${Date.now()}-${Math.random()}`),
+    content: first(
+      comment.content,
+      comment.text,
+      comment.comment,
+      comment.body,
+      comment.message
+    ),
+    created_at: first(comment.created_at, comment.createdAt, null),
+    user: {
+      ...user,
+      id: first(user.id, comment.user_id, null),
+      username: first(
+        user.username,
+        user.user_name,
+        user.handle,
+        comment.username,
+        "User"
+      ),
+      display_name: first(
+        user.display_name,
+        user.full_name,
+        user.name,
+        user.username,
+        comment.username,
+        "User"
+      ),
+      avatar_url: first(
+        user.avatar_url,
+        user.avatar,
+        user.profile_image,
+        user.profile_picture
+      ),
+    },
+  };
+};
+
+export const normalizePost = (post: AnyObj = {}) => {
+  const creator = normalizeCreator(first(post.creator, post.user, post.profile, {}));
+
+  const premium =
+    boolFrom(
+      post.is_premium,
+      post.is_ppv,
+      post.ppv,
+      post.is_paid,
+      post.paid_post
+    ) || ["ppv", "premium"].includes(post.visibility);
+
+  const subscribed = boolFrom(
+    post.viewer_is_subscribed,
+    post.is_subscribed,
+    post.subscription_active,
+    post.has_subscription,
+    post.creator?.is_subscribed,
+    creator.is_subscribed
+  );
+
+  const caption = first(post.caption, post.content, post.description, post.text);
+
+  const likes = firstNum(
+    post.likes_count,
+    post.like_count,
+    post.total_likes,
+    post.stats?.likes_count,
+    post.stats?.like_count,
+    post.stats?.total_likes,
+    Array.isArray(post.likes) ? post.likes.length : undefined,
+    Array.isArray(post.liked_by) ? post.liked_by.length : undefined
+  );
+
+  const comments = firstNum(
+    post.comments_count,
+    post.comment_count,
+    post.total_comments,
+    post.stats?.comments_count,
+    post.stats?.comment_count,
+    post.stats?.total_comments,
+    Array.isArray(post.comments) ? post.comments.length : undefined
+  );
+
+  const locked = premium && !subscribed;
+
+  return {
+    ...post,
+    creator,
+    creator_id: first(post.creator_id, creator.id, post.user_id, null),
+    title: post.title || "",
+    caption,
+    content: caption,
+    description: caption,
+    likes_count: likes,
+    like_count: likes,
+    comments_count: comments,
+    comment_count: comments,
+    is_liked: boolFrom(
+      post.is_liked,
+      post.liked,
+      post.viewer_has_liked,
+      post.meta?.is_liked
+    ),
+    is_bookmarked: boolFrom(
+      post.is_bookmarked,
+      post.bookmarked,
+      post.viewer_has_bookmarked
+    ),
+    is_premium: premium,
+    is_ppv: premium,
+    is_subscribed: subscribed,
+    can_view: !locked,
+    is_locked: locked,
+  };
+};
+
+const normalizePosts = (res: any) => unwrapList(res).map(normalizePost);
+const normalizeComments = (res: any) => unwrapList(res).map(normalizeComment);
+
+const normalizeWallet = (wallet: AnyObj = {}) => ({
+  ...wallet,
+  id: first(wallet.id, null),
+  balance: toNum(first(wallet.balance, wallet.amount)),
+  currency: wallet.currency || "USD",
+  created_at: wallet.created_at || null,
+  updated_at: wallet.updated_at || null,
+});
+
+export const normalizeTransaction = (tx: AnyObj = {}) => {
+  const flow = detectFlow(tx);
+  const amount = Math.abs(toNum(first(tx.amount, tx.transaction_amount)));
+
+  return {
+    ...tx,
+    id: first(tx.id, null),
+    type: String(
+      first(tx.type, tx.transaction_type, tx.entry_type, tx.kind)
+    ).toLowerCase(),
+    flow,
+    amount,
+    signed_amount: flow === "debit" ? -amount : amount,
+    currency: tx.currency || "USD",
+    status: normalizeStatus(tx.status),
+    title: first(
+      tx.title,
+      tx.description,
+      tx.label,
+      tx.reason,
+      flow === "credit" ? "Wallet Credit" : "Wallet Debit"
+    ),
+    note: first(tx.note, tx.message, tx.metadata_?.note, tx.metadata?.note),
+    reference_type: tx.reference_type || null,
+    reference_id: first(tx.reference_id, null),
+    creator_id: first(tx.creator_id, null),
+    provider: first(tx.provider, tx.metadata_?.provider, tx.metadata?.provider),
+    provider_transaction_id: first(
+      tx.provider_transaction_id,
+      tx.reference,
+      tx.metadata_?.payment_tx_id,
+      tx.metadata?.payment_tx_id
+    ),
+    created_at: first(tx.created_at, tx.date, tx.timestamp, null),
+    metadata_: tx.metadata_ || tx.metadata || {},
+  };
+};
+
+const normalizePayment = (payment: AnyObj = {}) => {
+  const amount = Math.abs(toNum(first(payment.amount, payment.transaction_amount)));
+
+  return {
+    ...payment,
+    id: first(payment.id, null),
+    provider: payment.provider || "",
+    provider_transaction_id: first(
+      payment.provider_transaction_id,
+      payment.reference
+    ),
+    amount,
+    signed_amount: -amount,
+    currency: payment.currency || "USD",
+    status: normalizeStatus(first(payment.status, payment.payment_status)),
+    type: String(
+      first(
+        payment.type,
+        payment.transaction_type,
+        payment.entry_type,
+        payment.kind,
+        "payment"
+      )
+    ).toLowerCase(),
+    flow: "debit",
+    title: first(
+      payment.title,
+      payment.description,
+      payment.label,
+      payment.reason,
+      "Payment"
+    ),
+    note: first(payment.note, payment.message),
+    created_at: first(payment.created_at, payment.date, payment.timestamp, null),
+    creator: payment.creator ? normalizeCreator(payment.creator) : payment.creator,
+    recipient: payment.recipient
+      ? normalizeCreator(payment.recipient)
+      : payment.recipient,
+  };
+};
+
+export const normalizeUserProfile = (profile: AnyObj = {}) => {
+  const data = asObj(profile.data);
+  const user = asObj(
+    first(profile.user, data.user, profile.profile, data.profile, data, profile, {})
+  );
+
+  return {
+    ...profile,
+    ...data,
+    ...user,
+    id: first(user.id, data.id, profile.id, null),
+    email: first(user.email, data.email, profile.email),
+    username: first(
+      user.username,
+      user.user_name,
+      user.handle,
+      data.username,
+      data.user_name,
+      data.handle,
+      profile.username,
+      profile.user_name,
+      profile.handle
+    ),
+    display_name: first(
+      user.display_name,
+      user.full_name,
+      user.name,
+      data.display_name,
+      data.full_name,
+      data.name,
+      profile.display_name,
+      profile.full_name,
+      profile.name,
+      user.username,
+      data.username,
+      profile.username,
+      "User"
+    ),
+    full_name: first(
+      user.full_name,
+      user.display_name,
+      user.name,
+      data.full_name,
+      data.display_name,
+      data.name,
+      profile.full_name,
+      profile.display_name,
+      profile.name
+    ),
+    avatar: first(
+      user.avatar,
+      user.avatar_url,
+      user.profile_image,
+      user.profile_picture,
+      user.image,
+      data.avatar,
+      data.avatar_url,
+      data.profile_image,
+      data.profile_picture,
+      data.image,
+      profile.avatar,
+      profile.avatar_url,
+      profile.profile_image,
+      profile.profile_picture,
+      profile.image
+    ),
+    avatar_url: first(
+      user.avatar_url,
+      user.avatar,
+      user.profile_image,
+      user.profile_picture,
+      user.image,
+      data.avatar_url,
+      data.avatar,
+      data.profile_image,
+      data.profile_picture,
+      data.image,
+      profile.avatar_url,
+      profile.avatar,
+      profile.profile_image,
+      profile.profile_picture,
+      profile.image
+    ),
+    cover_image: first(
+      user.cover_image,
+      user.cover_photo_url,
+      user.cover_url,
+      data.cover_image,
+      data.cover_photo_url,
+      data.cover_url,
+      profile.cover_image,
+      profile.cover_photo_url,
+      profile.cover_url
+    ),
+    bio: first(user.bio, data.bio, profile.bio),
+  };
+};
+
+const withData = (res: any, data: any) => ({
+  ...(typeof res === "object" && res ? res : {}),
+  data,
+});
+
+const profileForm = (
+  data: AnyObj,
+  files?: {
+    avatar?: File | null;
+    cover_image?: File | null;
+  }
+) => {
+  const formData = new FormData();
+  formData.append("profile_update", JSON.stringify(data));
+  if (files?.avatar) formData.append("avatar", files.avatar);
+  if (files?.cover_image) formData.append("cover_image", files.cover_image);
+  return formData;
+};
 
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 export const authApi = {
@@ -651,16 +748,13 @@ export const authApi = {
     display_name: string;
   }) => apiFetch("/auth/register", "POST", data),
 
-  me: () => apiFetch("/user/profile/me"),
+  me: async () => normalizeUserProfile(await apiFetch("/user/profile/me")),
 
   forgotPassword: (email: string) =>
     apiFetch("/auth/forgot-password", "POST", { email }),
 
   resetPassword: (token: string, new_password: string) =>
-    apiFetch("/auth/reset-password", "POST", {
-      token,
-      new_password,
-    }),
+    apiFetch("/auth/reset-password", "POST", { token, new_password }),
 };
 
 // ─── FEED ────────────────────────────────────────────────────────────────────
@@ -669,23 +763,16 @@ export const feedApi = {
     const res = await apiFetch(
       `/user/browse/posts${buildQueryString({ limit, offset })}`
     );
-
-    const list = normalizeListOfPosts(res);
-    return {
-      ...(typeof res === "object" && res ? res : {}),
-      data: list,
-    };
+    return withData(res, normalizePosts(res));
   },
 
   getAllCreatorsPostsRaw: (limit = 20, offset = 0) =>
     apiFetch(`/user/browse/posts${buildQueryString({ limit, offset })}`),
 
-  getAllCreatorsPostsList: async (limit = 20, offset = 0) => {
-    const res = await apiFetch(
-      `/user/browse/posts${buildQueryString({ limit, offset })}`
-    );
-    return normalizeListOfPosts(res);
-  },
+  getAllCreatorsPostsList: async (limit = 20, offset = 0) =>
+    normalizePosts(
+      await apiFetch(`/user/browse/posts${buildQueryString({ limit, offset })}`)
+    ),
 };
 
 // ─── BROWSE / CREATOR PROFILE ────────────────────────────────────────────────
@@ -694,35 +781,21 @@ export const browseApi = {
     const res = await apiFetch(
       `/user/browse/creators${buildQueryString({ limit, offset })}`
     );
-
-    const list = unwrapList(res).map((item: any) => normalizeCreator(item));
-    return {
-      ...(typeof res === "object" && res ? res : {}),
-      data: list,
-    };
+    return withData(res, unwrapList(res).map(normalizeCreator));
   },
 
-  getCreatorsList: async (limit = 20, offset = 0) => {
-    const res = await apiFetch(
-      `/user/browse/creators${buildQueryString({ limit, offset })}`
-    );
-    return unwrapList(res).map((item: any) => normalizeCreator(item));
-  },
+  getCreatorsList: async (limit = 20, offset = 0) =>
+    unwrapList(
+      await apiFetch(`/user/browse/creators${buildQueryString({ limit, offset })}`)
+    ).map(normalizeCreator),
 
   getCreatorProfile: async (creatorId: string | number) => {
     const res = await apiFetch(`/user/browse/creators/${creatorId}`);
-    const item = normalizeCreator(res);
-
-    return {
-      ...(typeof res === "object" && res ? res : {}),
-      data: item,
-    };
+    return withData(res, normalizeCreator(res));
   },
 
-  getCreatorProfileItem: async (creatorId: string | number) => {
-    const res = await apiFetch(`/user/browse/creators/${creatorId}`);
-    return normalizeCreator(res);
-  },
+  getCreatorProfileItem: async (creatorId: string | number) =>
+    normalizeCreator(await apiFetch(`/user/browse/creators/${creatorId}`)),
 
   getCreatorPosts: async (
     creatorId: string | number,
@@ -735,27 +808,22 @@ export const browseApi = {
         offset,
       })}`
     );
-
-    const list = normalizeListOfPosts(res);
-    return {
-      ...(typeof res === "object" && res ? res : {}),
-      data: list,
-    };
+    return withData(res, normalizePosts(res));
   },
 
   getCreatorPostsList: async (
     creatorId: string | number,
     limit = 20,
     offset = 0
-  ) => {
-    const res = await apiFetch(
-      `/user/browse/creators/${creatorId}/posts${buildQueryString({
-        limit,
-        offset,
-      })}`
-    );
-    return normalizeListOfPosts(res);
-  },
+  ) =>
+    normalizePosts(
+      await apiFetch(
+        `/user/browse/creators/${creatorId}/posts${buildQueryString({
+          limit,
+          offset,
+        })}`
+      )
+    ),
 
   getPost: async (postId: string | number, creatorId: string | number) => {
     const res = await apiFetch(
@@ -763,12 +831,7 @@ export const browseApi = {
         creator_id: creatorId,
       })}`
     );
-
-    const item = normalizePost(unwrapItem(res));
-    return {
-      ...(typeof res === "object" && res ? res : {}),
-      data: item,
-    };
+    return withData(res, normalizePost(unwrapItem(res)));
   },
 
   checkPostAccess: (postId: string | number, creatorId: string | number) =>
@@ -782,7 +845,8 @@ export const browseApi = {
     const creators = await browseApi.getCreatorsList(100, 0);
     return (
       creators.find(
-        (c: any) => c?.username?.toLowerCase() === username.toLowerCase()
+        (creator: any) =>
+          creator?.username?.toLowerCase() === username.toLowerCase()
       ) || null
     );
   },
@@ -797,96 +861,48 @@ export const browseApi = {
       browseApi.getCreatorPostsList(creatorId, limit, offset),
     ]);
 
-    return {
-      creator,
-      posts,
-    };
+    return { creator, posts };
   },
 };
 
 // ─── CREATORS API ALIAS ──────────────────────────────────────────────────────
 export const creatorsApi = {
-  getCreatorById: (creatorId: string | number) =>
-    browseApi.getCreatorProfile(creatorId),
-
-  getCreatorProfile: (creatorId: string | number) =>
-    browseApi.getCreatorProfile(creatorId),
-
-  getCreatorPosts: (creatorId: string | number, limit = 20, offset = 0) =>
-    browseApi.getCreatorPosts(creatorId, limit, offset),
-
-  getCreatorByUsername: async (username: string) =>
-    browseApi.getCreatorByUsername(username),
-
-  getCreatorFullProfile: async (
-    creatorId: string | number,
-    limit = 20,
-    offset = 0
-  ) => browseApi.getCreatorFullProfile(creatorId, limit, offset),
+  getCreatorById: browseApi.getCreatorProfile,
+  getCreatorProfile: browseApi.getCreatorProfile,
+  getCreatorPosts: browseApi.getCreatorPosts,
+  getCreatorByUsername: browseApi.getCreatorByUsername,
+  getCreatorFullProfile: browseApi.getCreatorFullProfile,
 };
 
 // ─── PROFILE ─────────────────────────────────────────────────────────────────
 export const userProfileApi = {
-  getMe: () => apiFetch("/user/profile/me"),
+  getMe: async () => normalizeUserProfile(await apiFetch("/user/profile/me")),
 
-  updateMe: (data: {
-    username?: string;
-    display_name?: string;
-    bio?: string;
-    phone?: string;
-    date_of_birth?: string;
-  }) => {
-    const formData = new FormData();
-    formData.append("profile_update", JSON.stringify(data));
-    return apiFetch("/user/profile/me", "PUT", formData, true);
-  },
+  updateMe: async (data: AnyObj) =>
+    normalizeUserProfile(
+      await apiFetch("/user/profile/me", "PUT", profileForm(data), true)
+    ),
 
-  updateMeWithAvatar: (
-    data: {
-      username?: string;
-      display_name?: string;
-      bio?: string;
-      phone?: string;
-      date_of_birth?: string;
-    },
-    avatar?: File | null
-  ) => {
-    const formData = new FormData();
-    formData.append("profile_update", JSON.stringify(data));
+  updateMeWithAvatar: async (data: AnyObj, avatar?: File | null) =>
+    normalizeUserProfile(
+      await apiFetch(
+        "/user/profile/me",
+        "PUT",
+        profileForm(data, { avatar }),
+        true
+      )
+    ),
 
-    if (avatar) {
-      formData.append("avatar", avatar);
-    }
-
-    return apiFetch("/user/profile/me", "PUT", formData, true);
-  },
-
-  updateMeWithFiles: (
-    data: {
-      username?: string;
-      display_name?: string;
-      bio?: string;
-      phone?: string;
-      date_of_birth?: string;
-    },
+  updateMeWithFiles: async (
+    data: AnyObj,
     files?: {
       avatar?: File | null;
       cover_image?: File | null;
     }
-  ) => {
-    const formData = new FormData();
-    formData.append("profile_update", JSON.stringify(data));
-
-    if (files?.avatar) {
-      formData.append("avatar", files.avatar);
-    }
-
-    if (files?.cover_image) {
-      formData.append("cover_image", files.cover_image);
-    }
-
-    return apiFetch("/user/profile/me", "PUT", formData, true);
-  },
+  ) =>
+    normalizeUserProfile(
+      await apiFetch("/user/profile/me", "PUT", profileForm(data, files), true)
+    ),
 };
 
 // ─── SUBSCRIPTIONS ───────────────────────────────────────────────────────────
@@ -939,18 +955,16 @@ export const notificationsApi = {
       ...res,
       data: Array.isArray(res?.data) ? res.data : [],
       pagination: {
-        total: Number(res?.pagination?.total ?? 0),
-        limit: Number(res?.pagination?.limit ?? limit),
-        offset: Number(res?.pagination?.offset ?? offset),
+        total: toNum(res?.pagination?.total),
+        limit: toNum(res?.pagination?.limit, limit),
+        offset: toNum(res?.pagination?.offset, offset),
         has_more: Boolean(res?.pagination?.has_more),
       },
     };
   },
 
-  getNotificationsList: async (limit = 20, offset = 0) => {
-    const res = await notificationsApi.getNotifications(limit, offset);
-    return res.data || [];
-  },
+  getNotificationsList: async (limit = 20, offset = 0) =>
+    (await notificationsApi.getNotifications(limit, offset)).data || [],
 
   getUnreadCount: () => apiFetch("/user/notifications/unread-count"),
 
@@ -966,7 +980,9 @@ export const messagesApi = {
     apiFetch(`/user/conversations${buildQueryString({ limit, offset })}`),
 
   startConversation: (creatorId: string | number) =>
-    apiFetch("/user/conversations", "POST", { creator_id: creatorId }),
+    apiFetch("/user/conversations", "POST", {
+      creator_id: creatorId,
+    }),
 
   getConversation: (conversationId: string | number) =>
     apiFetch(`/user/conversations/${conversationId}`),
@@ -994,29 +1010,26 @@ export const interactApi = {
   toggleLike: async (postId: string | number) => {
     const res = await apiFetch(`/user/interact/posts/${postId}/like`, "POST");
 
-    const rawLiked =
-      res?.liked ??
-      res?.is_liked ??
-      res?.data?.liked ??
-      res?.data?.is_liked;
+    const rawLiked = first(
+      res?.liked,
+      res?.is_liked,
+      res?.data?.liked,
+      res?.data?.is_liked
+    );
 
-    const rawLikesCount =
-      res?.likes_count ??
-      res?.like_count ??
-      res?.total_likes ??
-      res?.data?.likes_count ??
-      res?.data?.like_count ??
-      res?.data?.total_likes;
+    const rawLikes = first(
+      res?.likes_count,
+      res?.like_count,
+      res?.total_likes,
+      res?.data?.likes_count,
+      res?.data?.like_count,
+      res?.data?.total_likes
+    );
 
     return {
       raw: res,
       liked: typeof rawLiked === "boolean" ? rawLiked : undefined,
-      likes_count:
-        rawLikesCount === undefined ||
-        rawLikesCount === null ||
-        rawLikesCount === ""
-          ? undefined
-          : Number(rawLikesCount),
+      likes_count: rawLikes === "" ? undefined : Number(rawLikes),
     };
   },
 
@@ -1024,20 +1037,22 @@ export const interactApi = {
     postId: string | number,
     creatorId: string | number
   ) => {
+    const query = buildQueryString({
+      creator_id: creatorId,
+    });
+
     const res = await apiFetch(
-      `/user/interact/posts/${postId}/bookmark${buildQueryString({
-        creator_id: creatorId,
-      })}`,
+      `/user/interact/posts/${postId}/bookmark${query}`,
       "POST"
     );
 
     return {
       raw: res,
-      bookmarked: Boolean(
-        res?.bookmarked ??
-          res?.is_bookmarked ??
-          res?.data?.bookmarked ??
-          res?.data?.is_bookmarked
+      bookmarked: boolFrom(
+        res?.bookmarked,
+        res?.is_bookmarked,
+        res?.data?.bookmarked,
+        res?.data?.is_bookmarked
       ),
     };
   },
@@ -1050,12 +1065,12 @@ export const interactApi = {
       })}`
     );
 
-    const comments = normalizeCommentsList(res);
+    const comments = normalizeComments(res);
 
     return {
       raw: res,
       comments,
-      comments_count: getSafeNumber(
+      comments_count: firstNum(
         res?.comments_count,
         res?.comment_count,
         res?.data?.comments_count,
@@ -1070,19 +1085,19 @@ export const interactApi = {
     content: string,
     parent_id?: string | number | null
   ) => {
-    const body: Record<string, any> = { content };
-    if (parent_id) body.parent_id = parent_id;
-
     const res = await apiFetch(
       `/user/interact/posts/${postId}/comments`,
       "POST",
-      body
+      {
+        content,
+        ...(parent_id ? { parent_id } : {}),
+      }
     );
 
     return {
       raw: res,
       comment: normalizeComment(res?.data || res),
-      comments_count: getSafeNumber(
+      comments_count: firstNum(
         res?.comments_count,
         res?.comment_count,
         res?.data?.comments_count,
@@ -1100,38 +1115,30 @@ export const interactApi = {
 
 // ─── BOOKMARKS ───────────────────────────────────────────────────────────────
 export const bookmarksApi = {
-  getBookmarks: async () => {
-    const res = await apiFetch("/user/bookmarks/");
-    const list = Array.isArray(res?.data) ? res.data : [];
-    return list.map((post: any) => normalizePost(post));
-  },
+  getBookmarks: async () =>
+    unwrapList(await apiFetch("/user/bookmarks/")).map(normalizePost),
 };
 
 // ─── WALLET ──────────────────────────────────────────────────────────────────
 export const walletApi = {
-  getWallet: async () => {
-    const res = await apiFetch("/user/wallet/");
-    return normalizeWallet(unwrapItem(res));
-  },
+  getWallet: async () =>
+    normalizeWallet(unwrapItem(await apiFetch("/user/wallet/"))),
 
-  getTransactions: async () => {
-    const res = await apiFetch("/user/wallet/transactions");
-    return normalizeListOfTransactions(res);
-  },
+  getTransactions: async () =>
+    unwrapList(await apiFetch("/user/wallet/transactions")).map(
+      normalizeTransaction
+    ),
 
   getTransactionsRaw: () => apiFetch("/user/wallet/transactions"),
 
-  deposit: async (amount: number) => {
-    return apiFetch("/user/wallet/deposit", "POST", { amount });
-  },
+  deposit: (amount: number) =>
+    apiFetch("/user/wallet/deposit", "POST", { amount }),
 };
 
 // ─── PAYMENTS ────────────────────────────────────────────────────────────────
 export const paymentsApi = {
-  getPaymentHistory: async () => {
-    const res = await apiFetch("/user/payments/");
-    return normalizeListOfPayments(res);
-  },
+  getPaymentHistory: async () =>
+    unwrapList(await apiFetch("/user/payments/")).map(normalizePayment),
 
   getPaymentHistoryRaw: () => apiFetch("/user/payments/"),
 };
@@ -1166,6 +1173,7 @@ export const financeApi = {
 export const creatorRequestApi = {
   becomeCreator: () => apiFetch("/user/become-creator", "POST"),
 };
+
 
 // ─── MEDIA URL helper ────────────────────────────────────────────────────────
 export const mediaUrl = (
