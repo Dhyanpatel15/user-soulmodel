@@ -1,4 +1,15 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const rawBaseUrl =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "";
+
+export const BASE_URL = rawBaseUrl.replace(/\/+$/, "");
+
+if (!BASE_URL && typeof window !== "undefined") {
+  console.error(
+    "NEXT_PUBLIC_API_URL is missing. Add it in .env.local or production environment."
+  );
+}
+
 const API = `${BASE_URL}/api/v1`;
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -41,7 +52,6 @@ const errMsg = (err: any): string => {
   return String(err);
 };
 
-// ─── Token helpers ───────────────────────────────────────────────────────────
 // ─── Token helpers ───────────────────────────────────────────────────────────
 export const getToken = () =>
   isBrowser() ? localStorage.getItem("access_token") : null;

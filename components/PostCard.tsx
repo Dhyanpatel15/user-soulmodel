@@ -476,6 +476,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
       active = false;
     };
   }, []);
+  
 
   const blockImageDownload = (
     e:
