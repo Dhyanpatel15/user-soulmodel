@@ -29,7 +29,7 @@ export default function BookmarksPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-1">Bookmarks</h1>
-      <p className="text-gray-500 text-sm mb-8">Posts you've saved for later</p>
+      <p className="text-gray-500 text-sm mb-8">You haven&apos;t bookmarked anything yet.</p>
 
       {loading ? (
         <Spinner text="Loading bookmarks..." />
