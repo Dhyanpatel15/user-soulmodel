@@ -341,6 +341,7 @@ export default function MobileHeader() {
               className="flex items-center gap-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
             >
               {avatarSrc && !imageError ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={avatarSrc}
                   src={avatarSrc}

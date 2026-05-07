@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { messagesApi, browseApi, mediaUrl } from "@/lib/api";
 import { Send, BadgeCheck, ArrowLeft } from "lucide-react";
 import Spinner from "@/components/Spinner";
@@ -28,11 +29,14 @@ function Avatar({ user, size = 40 }: any) {
   }
 
   return (
-    <img
+    <Image
       src={avatarUrl}
       onError={() => setImgError(true)}
-      style={{ width: size, height: size }}
+      width={size}
+      height={size}
+      alt={name}
       className="rounded-full object-cover flex-shrink-0"
+      style={{ width: size, height: size }}
     />
   );
 }
@@ -104,9 +108,6 @@ export default function ChatPage() {
   };
 
   const getOther = (conv: any) => conv.creator || conv.other_user || conv.participant || {};
-
-  // On mobile: show chat view OR list view (not both)
-  // On desktop: show both side by side
 
   return (
     <div className="flex h-[calc(100vh-56px)] md:h-screen bg-gray-100">

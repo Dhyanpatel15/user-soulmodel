@@ -854,6 +854,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
             onClick={(e) => e.stopPropagation()}
           >
             {creatorAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={mediaUrl(creatorAvatar)}
                 alt={creatorDisplayName}
@@ -964,6 +965,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
               </>
             ) : (
               <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={mediaUrl(firstMedia.url)}
                   alt="Post media"
@@ -1084,6 +1086,7 @@ export default function PostCard({ post, onLikeChange }: PostCardProps) {
                 className="max-w-[95vw] max-h-[90vh] rounded-xl"
               />
             ) : (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={mediaUrl(activeMedia.url)}
                 alt="Full preview"
