@@ -119,6 +119,7 @@ export const unwrapList = <T = any>(response: any): T[] => {
   return [];
 };
 
+
 export const unwrapItem = <T = any>(response: any): T => {
   for (const key of [
     "data",
@@ -1049,6 +1050,7 @@ export const interactApi = {
   ) => {
     const query = buildQueryString({
       creator_id: creatorId,
+      
     });
 
     const res = await apiFetch(
